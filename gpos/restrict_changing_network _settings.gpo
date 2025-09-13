@@ -1,0 +1,8 @@
+# Polkit rule: allow NM changes only for sudo group members
+sudo tee /etc/polkit-1/rules.d/50-networkmanager-admins.rules >/dev/null <<'EOF'
+polkit.addRule(function(action, subject) {
+  if (action.id.indexOf("org.freedesktop.NetworkManager") === 0) {
+    return subject.isInGroup("sudo") ? polkit.Result.YES : polkit.Result.NO;
+  }
+});
+EOF
