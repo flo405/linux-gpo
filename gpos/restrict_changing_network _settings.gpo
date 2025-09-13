@@ -7,7 +7,6 @@ polkit.addRule(function(action, subject) {
 
   // Allow regular users to operate Wi-Fi in normal ways:
   var userAllowed = [
-    "org.freedesktop.NetworkManager.network-control",   // connect/disconnect, activate profiles
     "org.freedesktop.NetworkManager.settings.modify.own", // create/modify *own* connections
     "org.freedesktop.NetworkManager.enable-disable-wifi", // toggle Wi-Fi radio
     "org.freedesktop.NetworkManager.wifi.scan"            // trigger scans
