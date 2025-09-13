@@ -1,0 +1,9 @@
+# By default, snapd’s privileged operations require an admin (sudo/admin group) via the io.snapcraft.snapd.manage action. You can make this explicit with a rule (and it also blocks GUI Snap Store prompts for non-admins)
+
+sudo tee /etc/polkit-1/rules.d/60-snapd-manage.rules >/dev/null <<'EOF'
+polkit.addRule(function(action, subject) {
+  if (action.id == "io.snapcraft.snapd.manage") {
+    return subject.isInGroup("sudo") ? polkit.Result.YES : polkit.Result.NO;
+  }
+});
+EOF
