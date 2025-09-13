@@ -4,6 +4,7 @@ blacklist usb-storage
 blacklist usb_storage
 blacklist uas
 EOF
+sudo modprobe -r uas usb_storage 2>/dev/null || true
 sudo update-initramfs -u
 
 
