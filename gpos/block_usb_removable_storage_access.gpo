@@ -1,0 +1,8 @@
+# Prevent the usb-storage driver from loading
+sudo tee /etc/modprobe.d/disable-usb-storage.conf >/dev/null <<'EOF'
+install usb-storage /bin/false
+blacklist usb-storage
+EOF
+
+# Rebuild initramfs so the rule applies early
+sudo update-initramfs -u
