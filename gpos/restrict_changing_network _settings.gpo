@@ -1,8 +1,22 @@
-# Polkit rule: allow NM changes only for sudo group members
+# Polkit rule: allow only wifi settings for useers and all other NM changes only for sudo group members
 sudo tee /etc/polkit-1/rules.d/50-networkmanager-admins.rules >/dev/null <<'EOF'
 polkit.addRule(function(action, subject) {
-  if (action.id.indexOf("org.freedesktop.NetworkManager") === 0) {
-    return subject.isInGroup("sudo") ? polkit.Result.YES : polkit.Result.NO;
-  }
+  // Only care about NetworkManager actions
+  if (action.id.indexOf("org.freedesktop.NetworkManager") !== 0)
+    return;
+
+  // Allow regular users to operate Wi-Fi in normal ways:
+  var userAllowed = [
+    "org.freedesktop.NetworkManager.network-control",   // connect/disconnect, activate profiles
+    "org.freedesktop.NetworkManager.settings.modify.own", // create/modify *own* connections
+    "org.freedesktop.NetworkManager.enable-disable-wifi", // toggle Wi-Fi radio
+    "org.freedesktop.NetworkManager.wifi.scan"            // trigger scans
+  ];
+
+  if (userAllowed.indexOf(action.id) !== -1 && subject.active)
+    return polkit.Result.YES;
+
+  // Everything else (e.g. edit *system* profiles, global networking, hostname) = admins only
+  return subject.isInGroup("sudo") ? polkit.Result.YES : polkit.Result.NO;
 });
 EOF
