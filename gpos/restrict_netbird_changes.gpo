@@ -15,10 +15,10 @@ EOF
 sudo install -d -o root -g sudo -m 2770 /run/netbird
 sudo snap set netbird service-run-arguments="--daemon-addr unix:///run/netbird/netbird.sock"
 sudo snap restart netbird
-sudo mkdir -p /etc/systemd/system/snap.netbird.netbird.service.d
-printf "[Service]\nUMask=007\n" | sudo tee /etc/systemd/system/snap.netbird.netbird.service.d/10-umask.conf
+sudo mkdir -p /etc/systemd/system/snap.netbird.service-run.service.d
+printf "[Service]\nUMask=007\n" | sudo tee /etc/systemd/system/snap.netbird.service-run.service.d/10-umask.conf
 sudo systemctl daemon-reload
-sudo systemctl restart snap.netbird.netbird.service
+sudo systemctl restart snap.netbird.service-run.service
 
 # If you keep any local config in the snap data dir, make it root:sudo, 0640:
 sudo chown -R root:sudo /var/snap/netbird/common
