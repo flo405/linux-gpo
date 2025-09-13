@@ -12,15 +12,12 @@ polkit.addRule(function(action, subject) {
 EOF
 
 # By default, regular users can talk to the NetBird daemon via its Unix socket, which lets them run netbird down. We’ll move the daemon’s socket into a root:sudo directory and tighten permissions so only admins can connect.
-sudo install -d -o root -g sudo -m 2770 /run/netbird
-sudo snap set netbird service-run-arguments="--daemon-addr unix:///run/netbird/netbird.sock"
+sudo snap set netbird service-run-arguments="--daemon-addr unix:///var/snap/netbird/common/netbird.sock"
 sudo snap restart netbird
+sudo chown root:sudo /var/snap/netbird/common
+sudo chmod 2770 /var/snap/netbird/common
 sudo mkdir -p /etc/systemd/system/snap.netbird.service-run.service.d
 printf "[Service]\nUMask=007\n" | sudo tee /etc/systemd/system/snap.netbird.service-run.service.d/10-umask.conf
 sudo systemctl daemon-reload
 sudo systemctl restart snap.netbird.service-run.service
 
-# If you keep any local config in the snap data dir, make it root:sudo, 0640:
-sudo chown -R root:sudo /var/snap/netbird/common
-sudo find /var/snap/netbird/common -type f -name '*.json' -exec chmod 640 {} \;
-sudo find /var/snap/netbird/common -type d -exec chmod 750 {} \;
