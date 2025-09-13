@@ -1,24 +1,9 @@
 # Prevent the usb-storage driver from loading (block both legacy usb_storage and modern UAS driver)
 sudo tee /etc/modprobe.d/disable-usb-storage.conf >/dev/null <<'EOF'
-install usb-storage /bin/false
-install usb_storage /bin/false
-install uas /bin/false
-
 blacklist usb-storage
 blacklist usb_storage
 blacklist uas
 EOF
 sudo update-initramfs -u
 
-# Block userland mounting via polkit (even if a driver slips through)
-sudo tee /etc/polkit-1/rules.d/60-removable-mounts-admins.rules >/dev/null <<'EOF'
-polkit.addRule(function(action, subject) {
-  // Common udisks2 mount actions
-  if (action.id == "org.freedesktop.udisks2.filesystem-mount" ||
-      action.id == "org.freedesktop.udisks2.filesystem-mount-system" ||
-      action.id == "org.freedesktop.udisks2.encrypted-unlock") {
-    return subject.isInGroup("sudo") ? polkit.Result.YES : polkit.Result.NO;
-  }
-});
-EOF
 
