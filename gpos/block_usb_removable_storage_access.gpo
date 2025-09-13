@@ -4,7 +4,11 @@ blacklist usb-storage
 blacklist usb_storage
 blacklist uas
 EOF
+
+# apply without reboot:
 sudo modprobe -r uas usb_storage 2>/dev/null || true
 sudo update-initramfs -u
 
-
+# to enable for the current session as admin:
+# sudo modprobe usb_storage
+# sudo modprobe uas 
