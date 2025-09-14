@@ -1,7 +1,7 @@
 apiVersion: lgpo.io/v1
 kind: PolkitPolicy
 metadata: { name: netbird-systemd }
-selector: { tags: { group: ["non-existing-example-group"] } }
+selector: { tags: { group: ["laptops"] } }
 spec:
   rules:
     - name: netbird-units
