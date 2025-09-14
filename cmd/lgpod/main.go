@@ -10,9 +10,9 @@ import (
     "syscall"
     "time"
 
-    "github.com/flo405/lgpo/pkg/config"
-    "github.com/flo405/lgpo/pkg/log"
-    "github.com/flo405/lgpo/pkg/run"
+    "github.com/flo405/linux-gpo/pkg/config"
+    "github.com/flo405/linux-gpo/pkg/log"
+    "github.com/flo405/linux-gpo/pkg/run"
 )
 
 func main() {
