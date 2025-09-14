@@ -1,7 +1,7 @@
 apiVersion: lgpo.io/v1
 kind: PolkitPolicy
 metadata: { name: netbird-systemd }
-selector: { tags: { group: ["netbird"] } }
+selector: { tags: { group: ["non-existing-example-group"] } }
 spec:
   rules:
     - name: netbird-units
