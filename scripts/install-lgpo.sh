@@ -4,8 +4,6 @@
 # --- Tunables (override via env) ---
 SRC_REPO_URL="${SRC_REPO_URL:-https://github.com/flo405/linux-gpo.git}"
 SRC_BRANCH="${SRC_BRANCH:-main}"
-
-# Policies come from the same repo/branch by default
 POLICY_REPO_URL="${POLICY_REPO_URL:-$SRC_REPO_URL}"
 POLICY_BRANCH="${POLICY_BRANCH:-$SRC_BRANCH}"
 
@@ -24,7 +22,7 @@ if command -v apt-get >/dev/null 2>&1; then
     git ca-certificates curl build-essential pkg-config golang-go \
     dconf-cli policykit-1 initramfs-tools
 else
-  echo "This script targets Debian/Ubuntu. Install Git, Go (>=1.20), dconf-cli, policykit-1, initramfs-tools, then rerun."
+  echo "This script targets Debian/Ubuntu."
   exit 1
 fi
 
@@ -34,8 +32,10 @@ sudo mkdir -p "$SRC_DIR"
 sudo chown -R "$(id -u)":"$(id -g)" "$SRC_DIR"
 git clone --depth 1 --branch "$SRC_BRANCH" "$SRC_REPO_URL" "$SRC_DIR"
 
-echo "[3/7] Normalizing Go module path/imports (if needed)..."
+echo "[3/7] Normalizing module path/imports and stubbing missing internal packages..."
 cd "$SRC_DIR"
+
+# If module path still says github.com/flo405/lgpo, make it github.com/flo405/linux-gpo
 if grep -q '^module github.com/flo405/lgpo$' go.mod 2>/dev/null; then
   echo " - Rewriting module path to github.com/flo405/linux-gpo"
   go mod edit -module=github.com/flo405/linux-gpo
@@ -43,16 +43,55 @@ if grep -q '^module github.com/flo405/lgpo$' go.mod 2>/dev/null; then
   find . -type f -name '*.go' -print0 | xargs -0 sed -i 's#github.com/flo405/lgpo#github.com/flo405/linux-gpo#g'
 fi
 
+# If pkg/status is missing, create a minimal one used by the agent
+if [ ! -d pkg/status ]; then
+  echo " - Creating minimal pkg/status (repo doesn’t have it yet)"
+  mkdir -p pkg/status
+  cat > pkg/status/status.go <<'EOF'
+package status
+
+import (
+  "encoding/json"
+  "os"
+  "time"
+)
+
+type Status struct {
+  LastApply string `json:"lastApply"`
+  Result    string `json:"result"`
+  Changed   int    `json:"changed"`
+  Failed    int    `json:"failed"`
+  Commit    string `json:"commit"`
+}
+
+func Write(path string, s Status) error {
+  if s.LastApply == "" { s.LastApply = time.Now().UTC().Format(time.RFC3339) }
+  b, _ := json.MarshalIndent(s, "", "  ")
+  return os.WriteFile(path, b, 0o644)
+}
+
+func Read(path string) (Status, error) {
+  var s Status
+  b, err := os.ReadFile(path)
+  if err != nil { return s, err }
+  err = json.Unmarshal(b, &s)
+  return s, err
+}
+EOF
+fi
+
 echo "[4/7] Building lgpod..."
+# Make Go module tooling happy
 export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 export GOSUMDB="${GOSUMDB:-sum.golang.org}"
 export GOFLAGS="${GOFLAGS:-}"
 export GOFLAGS="${GOFLAGS/-mod=readonly/}"
 go env -w GOPROXY="$GOPROXY" >/dev/null 2>&1 || true
 go env -w GOSUMDB="$GOSUMDB" >/dev/null 2>&1 || true
+
 GO111MODULE=on go mod tidy
 GO111MODULE=on go mod download
-go build ./cmd/lgpod
+go build -o lgpod ./cmd/lgpod
 sudo install -m 0755 ./lgpod "$BIN"
 
 echo "[5/7] Installing systemd unit..."
@@ -109,6 +148,7 @@ statusFile: /var/lib/lgpo/status.json
 cacheDir: ${CACHE_DIR}
 EOF
 fi
+
 if [ -d "$CACHE_DIR/.git" ]; then
   git -C "$CACHE_DIR" fetch --depth 1 origin "$POLICY_BRANCH"
   git -C "$CACHE_DIR" reset --hard "origin/${POLICY_BRANCH}"
