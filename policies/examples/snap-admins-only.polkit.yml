@@ -1,0 +1,11 @@
+apiVersion: lgpo.io/v1
+kind: PolkitPolicy
+metadata: { name: snap-admins-only }
+selector: { tags: { group: ["laptops"] } }
+spec:
+  rules:
+    - name: snapd
+      matches: [ { action_id: io.snapcraft.snapd.manage } ]
+      subject: { group: sudo }
+      result: AUTH_ADMIN_KEEP
+      default_result: NO

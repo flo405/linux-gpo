@@ -1,0 +1,15 @@
+apiVersion: lgpo.io/v1
+kind: DconfPolicy
+metadata: { name: lockscreen }
+selector: { tags: { group: ["laptops"] } }
+spec:
+  settings:
+    org/gnome/desktop/session:
+      idle-delay: "uint32 300"
+    org/gnome/desktop/screensaver:
+      lock-enabled: "true"
+      lock-delay: "uint32 0"
+  locks:
+    - /org/gnome/desktop/session/idle-delay
+    - /org/gnome/desktop/screensaver/lock-enabled
+    - /org/gnome/desktop/screensaver/lock-delay

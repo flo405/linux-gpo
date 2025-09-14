@@ -1,0 +1,8 @@
+apiVersion: lgpo.io/v1
+kind: ModprobePolicy
+metadata: { name: usb-block }
+selector: { tags: { group: ["laptops"] } }
+spec:
+  blacklist: ["usb_storage", "uas"]
+  installFalse: false
+  updateInitramfs: true
