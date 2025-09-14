@@ -32,55 +32,7 @@ sudo mkdir -p "$SRC_DIR"
 sudo chown -R "$(id -u)":"$(id -g)" "$SRC_DIR"
 git clone --depth 1 --branch "$SRC_BRANCH" "$SRC_REPO_URL" "$SRC_DIR"
 
-echo "[3/7] Normalizing module path/imports and stubbing missing internal packages..."
-cd "$SRC_DIR"
-
-# If module path still says github.com/flo405/lgpo, make it github.com/flo405/linux-gpo
-if grep -q '^module github.com/flo405/lgpo$' go.mod 2>/dev/null; then
-  echo " - Rewriting module path to github.com/flo405/linux-gpo"
-  go mod edit -module=github.com/flo405/linux-gpo
-  echo " - Rewriting imports to github.com/flo405/linux-gpo"
-  find . -type f -name '*.go' -print0 | xargs -0 sed -i 's#github.com/flo405/lgpo#github.com/flo405/linux-gpo#g'
-fi
-
-# If pkg/status is missing, create a minimal one used by the agent
-if [ ! -d pkg/status ]; then
-  echo " - Creating minimal pkg/status (repo doesn’t have it yet)"
-  mkdir -p pkg/status
-  cat > pkg/status/status.go <<'EOF'
-package status
-
-import (
-  "encoding/json"
-  "os"
-  "time"
-)
-
-type Status struct {
-  LastApply string `json:"lastApply"`
-  Result    string `json:"result"`
-  Changed   int    `json:"changed"`
-  Failed    int    `json:"failed"`
-  Commit    string `json:"commit"`
-}
-
-func Write(path string, s Status) error {
-  if s.LastApply == "" { s.LastApply = time.Now().UTC().Format(time.RFC3339) }
-  b, _ := json.MarshalIndent(s, "", "  ")
-  return os.WriteFile(path, b, 0o644)
-}
-
-func Read(path string) (Status, error) {
-  var s Status
-  b, err := os.ReadFile(path)
-  if err != nil { return s, err }
-  err = json.Unmarshal(b, &s)
-  return s, err
-}
-EOF
-fi
-
-echo "[4/7] Building lgpod..."
+echo "[3/7] Building lgpod..."
 # Make Go module tooling happy
 export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 export GOSUMDB="${GOSUMDB:-sum.golang.org}"
@@ -94,7 +46,7 @@ GO111MODULE=on go mod download
 go build -o lgpod ./cmd/lgpod
 sudo install -m 0755 ./lgpod "$BIN"
 
-echo "[5/7] Installing systemd unit..."
+echo "[4/7] Installing systemd unit..."
 if [ -f "packaging/systemd/lgpod.service" ]; then
   sudo install -m 0644 packaging/systemd/lgpod.service "$SYSTEMD_UNIT"
 else
@@ -133,7 +85,7 @@ EOF
 fi
 sudo systemctl daemon-reload
 
-echo "[6/7] Writing config & prefetching policies..."
+echo "[5/7] Writing config & prefetching policies..."
 sudo install -d -m 0755 /etc/lgpo "$TAGS_DIR" /var/lib/lgpo /var/log/lgpo "$CACHE_DIR"
 if [ ! -f "$CONFIG" ]; then
   sudo tee "$CONFIG" >/dev/null <<EOF
@@ -157,8 +109,8 @@ else
 fi
 git -C "$CACHE_DIR" rev-parse HEAD || true
 
-echo "[7/7] Enabling service & dry-run..."
+echo "[6/7] Enabling service & dry-run..."
 sudo systemctl enable --now lgpod || true
 sudo "$BIN" --sub run --once --dry-run || true
 
-echo "Done. Try: sudo lgpod --sub status"
+echo "[7/7] Done. Try: sudo lgpod --sub status"
