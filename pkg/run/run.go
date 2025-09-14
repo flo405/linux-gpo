@@ -13,17 +13,17 @@ import (
 
     "gopkg.in/yaml.v3"
 
-    "github.com/flo405/lgpo/pkg/config"
-    "github.com/flo405/lgpo/pkg/log"
-    gitpkg "github.com/flo405/lgpo/pkg/git"
-    "github.com/flo405/lgpo/pkg/facts"
-    "github.com/flo405/lgpo/pkg/tags"
-    "github.com/flo405/lgpo/pkg/selector"
-    "github.com/flo405/lgpo/pkg/status"
+    "github.com/flo405/linux-gpopkg/config"
+    "github.com/flo405/linux-gpo/pkg/log"
+    gitpkg "github.com/flo405/linux-gpopkg/git"
+    "github.com/flo405/linux-gpo/pkg/facts"
+    "github.com/flo405/linux-gpo/pkg/tags"
+    "github.com/flo405/linux-gpo/pkg/selector"
+    "github.com/flo405/linux-gpo/pkg/status"
 
-    pk "github.com/flo405/lgpo/pkg/polkit"
-    mp "github.com/flo405/lgpo/pkg/modprobe"
-    dc "github.com/flo405/lgpo/pkg/dconf"
+    pk "github.com/flo405/linux-gpo/pkg/polkit"
+    mp "github.com/flo405/linux-gpo/pkg/modprobe"
+    dc "github.com/flo405/linux-gpo/pkg/dconf"
 )
 
 type Runner struct {
