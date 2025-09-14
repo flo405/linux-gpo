@@ -17,7 +17,7 @@ import (
 	"github.com/flo405/linux-gpo/pkg/config"
 	"github.com/flo405/linux-gpo/pkg/facts"
 	"github.com/flo405/linux-gpo/pkg/git"
-	"github.com/flo405/linux-gpo/pkg/log"
+	lglog "github.com/flo405/linux-gpo/pkg/log"
 	"github.com/flo405/linux-gpo/pkg/selector"
 	"github.com/flo405/linux-gpo/pkg/status"
 
@@ -28,12 +28,12 @@ import (
 
 type Runner struct {
 	cfg       *config.Config
-	log       *log.Logger
+	log       *lglog.Logger
 	lastFacts map[string]string
 	lastTags  map[string]string
 }
 
-func New(cfg *config.Config, l *log.Logger) *Runner {
+func New(cfg *config.Config, l *lglog.Logger) *Runner {
 	return &Runner{cfg: cfg, log: l}
 }
 
@@ -58,11 +58,11 @@ func (r *Runner) ReadStatus() (status.Status, error) {
 func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	start := time.Now()
 
-	// Refresh facts/tags each run.
+	// Refresh inputs.
 	r.lastFacts = facts.Discover()
 	r.lastTags = loadTags(r.cfg.TagsDir)
 
-	// Ensure repo cache is present and up to date.
+	// Sync policies repo.
 	commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
 	if err != nil {
 		return err
@@ -87,10 +87,8 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			return nil
 		}
 
-		// Peek kind.
-		var hdr struct {
-			Kind string `yaml:"kind"`
-		}
+		// Peek at kind
+		var hdr struct{ Kind string `yaml:"kind"` }
 		if err := yaml.Unmarshal(b, &hdr); err != nil {
 			r.log.Warn("yaml", err.Error(), "file", path)
 			return nil
@@ -103,8 +101,11 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			if !selector.Sel{Facts: p.Selector.Facts, Tags: p.Selector.Tags, HostnameRegex: p.Selector.HostnameRegex}.
-				Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
+			if !selector.Sel{
+				Facts:         p.Selector.Facts,
+				Tags:          p.Selector.Tags,
+				HostnameRegex: p.Selector.HostnameRegex,
+			}.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
 			js, _, err := pk.Render(&p)
@@ -121,8 +122,11 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			if !selector.Sel{Facts: p.Selector.Facts, Tags: p.Selector.Tags, HostnameRegex: p.Selector.HostnameRegex}.
-				Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
+			if !selector.Sel{
+				Facts:         p.Selector.Facts,
+				Tags:          p.Selector.Tags,
+				HostnameRegex: p.Selector.HostnameRegex,
+			}.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
 			settings, locks, _, _, err := dc.Render(&p)
@@ -131,7 +135,8 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				return nil
 			}
 			sp, lp := dc.TargetPaths(p.Metadata.Name)
-			toApply = append(toApply,
+			toApply = append(
+				toApply,
 				applyItem{Path: sp, Data: settings, Mode: 0o644},
 				applyItem{Path: lp, Data: locks, Mode: 0o644},
 			)
@@ -143,8 +148,11 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			if !selector.Sel{Facts: p.Selector.Facts, Tags: p.Selector.Tags, HostnameRegex: p.Selector.HostnameRegex}.
-				Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
+			if !selector.Sel{
+				Facts:         p.Selector.Facts,
+				Tags:          p.Selector.Tags,
+				HostnameRegex: p.Selector.HostnameRegex,
+			}.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
 			conf, _, err := mp.Render(&p)
@@ -158,12 +166,12 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				initramfsTouched = true
 			}
 		default:
-			// Unknown kind -> ignore.
+			// ignore
 		}
 		return nil
 	})
 
-	// Apply all desired changes.
+	// Apply changes.
 	changed := 0
 	for _, it := range toApply {
 		c, err := r.applyAtomic(it, dry)
@@ -176,7 +184,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		}
 	}
 
-	// Post-steps.
+	// Post steps.
 	if !dry && dconfTouched {
 		_ = exec.CommandContext(ctx, "dconf", "update").Run()
 	}
@@ -185,14 +193,14 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	}
 
 	// Status + audit.
-	s := status.Status{
+	st := status.Status{
+		LastApply: time.Now().UTC().Format(time.RFC3339),
 		Result:    "ok",
 		Changed:   changed,
 		Failed:    0,
 		Commit:    commit,
-		LastApply: time.Now().UTC().Format(time.RFC3339),
 	}
-	_ = status.Write(r.cfg.StatusFile, s)
+	_ = status.Write(r.cfg.StatusFile, st)
 
 	rec := map[string]any{
 		"ts":         time.Now().UTC().Format(time.RFC3339),
@@ -236,7 +244,6 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 		}
 	}
 
-	// Dry-run: report change without writing.
 	if dry {
 		return true, nil
 	}
@@ -260,7 +267,7 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 	return true, nil
 }
 
-// loadTags is a tiny inline loader to avoid another import just for tags.
+// loadTags is an inline tag loader (avoids importing another pkg in the MVP).
 func loadTags(dir string) map[string]string {
 	m := map[string]string{}
 	ents, err := os.ReadDir(dir)
