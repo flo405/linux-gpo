@@ -13,9 +13,9 @@ import (
 
     "gopkg.in/yaml.v3"
 
-    "github.com/flo405/linux-gpopkg/config"
+    "github.com/flo405/linux-gpo/pkg/config"
     "github.com/flo405/linux-gpo/pkg/log"
-    gitpkg "github.com/flo405/linux-gpopkg/git"
+    gitpkg "github.com/flo405/linux-gpo/pkg/git"
     "github.com/flo405/linux-gpo/pkg/facts"
     "github.com/flo405/linux-gpo/pkg/tags"
     "github.com/flo405/linux-gpo/pkg/selector"
