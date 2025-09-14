@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# set -euo pipefail
 
 REPO_DIR="/opt/lgpo/src"
 BIN="/usr/local/bin/lgpod"
