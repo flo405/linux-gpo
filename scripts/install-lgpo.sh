@@ -52,3 +52,5 @@ only three safe policy types: **PolkitPolicy**, **DconfPolicy**, **ModprobePolic
 ## Build
 ```bash
 go build ./cmd/lgpod
+__LGPO_EOF__
+
