@@ -1,13 +1,13 @@
 # lgpo (Linux GPO) — MVP
 
-**Ultra-simple** agent that pulls policies straight from a Git repo and applies
-only three safe policy types: **PolkitPolicy**, **DconfPolicy**, **ModprobePolicy**.
+**Ultra-simple** agent that pulls policies straight from a Git repo and applies them on Linux workstations.
+There are currently three policy types: **PolkitPolicy**, **DconfPolicy**, **ModprobePolicy**.
 
-*No build/signing pipeline in this MVP.*
 
-## Repo layout (remote source of truth)
-`https://github.com/flo405/linux-gpo/` → `policies/` → all `*.yml`
-
+## Setup
+```bash
+curl -fsSL https://raw.githubusercontent.com/flo405/linux-gpo/main/scripts/install-lgpo.sh | sudo bash
+```
 ## Build
 ```bash
 go build ./cmd/lgpod
