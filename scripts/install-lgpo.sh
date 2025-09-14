@@ -10,7 +10,7 @@ CACHE_DIR="/var/lib/lgpo/repo"
 
 echo "[1/6] Installing prerequisites..."
 if command -v apt-get >/dev/null 2>&1; then
-  sudo apt-get update -y
+  # sudo apt-get update -y
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     git ca-certificates curl build-essential pkg-config golang-go \
     dconf-cli policykit-1 initramfs-tools
