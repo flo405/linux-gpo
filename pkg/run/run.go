@@ -26,6 +26,31 @@ import (
 	pk "github.com/flo405/linux-gpo/pkg/polkit"
 )
 
+type managedItem struct {
+	Path string `json:"path"`
+}
+type managedState struct {
+	Version int           `json:"version"`
+	Items   []managedItem `json:"items"`
+}
+
+func (r *Runner) managedPath() string {
+	// put it next to status.json
+	return filepath.Join(filepath.Dir(r.cfg.StatusFile), "managed.json")
+}
+func (r *Runner) loadManaged() managedState {
+	var s managedState
+	b, err := os.ReadFile(r.managedPath())
+	if err != nil { return s }
+	_ = json.Unmarshal(b, &s)
+	return s
+}
+func (r *Runner) saveManaged(items []managedItem) {
+	s := managedState{Version: 1, Items: items}
+	b, _ := json.MarshalIndent(s, "", "  ")
+	_ = os.WriteFile(r.managedPath(), b, 0o644)
+}
+
 type Runner struct {
 	cfg       *config.Config
 	log       *lglog.Logger
@@ -72,6 +97,9 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	var toApply []applyItem
 	dconfTouched := false
 	initramfsTouched := false
+	
+	desiredPaths := map[string]struct{}{}
+	desiredManaged := make([]managedItem, 0, 64)
 
 	_ = filepath.WalkDir(polDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -115,6 +143,8 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			}
 			tgt := "/etc/polkit-1/rules.d/60-lgpo-" + p.Metadata.Name + ".rules"
 			toApply = append(toApply, applyItem{Path: tgt, Data: js, Mode: 0o644})
+			desiredPaths[tgt] = struct{}{}
+			desiredManaged = append(desiredManaged, managedItem{Path: tgt})
 
 		case "DconfPolicy":
 			var p dc.Policy
@@ -136,12 +166,14 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				return nil
 			}
 			sp, lp := dc.TargetPaths(p.Metadata.Name)
-			toApply = append(
-				toApply,
-				applyItem{Path: sp, Data: settings, Mode: 0o644},
-				applyItem{Path: lp, Data: locks, Mode: 0o644},
+			toApply = append(toApply,
+    			applyItem{Path: sp, Data: settings, Mode: 0o644},
+    			applyItem{Path: lp, Data: locks, Mode: 0o644},
 			)
-			dconfTouched = true
+			desiredPaths[sp] = struct{}{}
+			desiredPaths[lp] = struct{}{}
+			desiredManaged = append(desiredManaged, managedItem{Path: sp}, managedItem{Path: lp})
+			dconfTouched = true // will be re-set later if only deletions happen; OK to keep true when anything changes
 
 		case "ModprobePolicy":
 			var p mp.Policy
@@ -164,14 +196,47 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			}
 			tgt := mp.TargetPath(p.Metadata.Name)
 			toApply = append(toApply, applyItem{Path: tgt, Data: conf, Mode: 0o644})
-			if p.Spec.UpdateInitramfs {
-				initramfsTouched = true
-			}
+			desiredPaths[tgt] = struct{}{}
+			desiredManaged = append(desiredManaged, managedItem{Path: tgt})
+			if p.Spec.UpdateInitramfs { initramfsTouched = true }
+
 		default:
 			// ignore unknown kinds
 		}
 		return nil
 	})
+	prev := r.loadManaged()
+	removed := 0
+
+	for _, it := range prev.Items {
+    	// only delete files we own and ONLY under our allowlist
+    	path := it.Path
+    	if _, stillDesired := desiredPaths[path]; stillDesired {
+        	continue
+    	}
+    	allowed := strings.HasPrefix(path, "/etc/polkit-1/rules.d/60-lgpo-") ||
+        	strings.HasPrefix(path, "/etc/dconf/db/local.d/60-lgpo-") ||
+        	strings.HasPrefix(path, "/etc/dconf/db/local.d/locks/60-lgpo-") ||
+        	strings.HasPrefix(path, "/etc/modprobe.d/60-lgpo-")
+    	if !allowed {
+        	continue
+    	}
+    	// drift-safe: only remove if file actually exists and looks managed
+    	if _, err := os.Stat(path); err == nil {
+        	if dry {
+            	removed++
+        	} else {
+            	_ = os.Remove(path)
+            	removed++
+            	if strings.HasPrefix(path, "/etc/dconf/db/local.d/") {
+                	dconfTouched = true
+            	}
+            	if strings.HasPrefix(path, "/etc/modprobe.d/") {
+                	initramfsTouched = true
+            	}
+        	}
+    	}
+	}
 
 	// Apply changes
 	changed := 0
@@ -192,6 +257,9 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	}
 	if !dry && initramfsTouched {
 		_ = exec.CommandContext(ctx, "update-initramfs", "-u").Run()
+	}
+	if !dry {
+   		r.saveManaged(desiredManaged)
 	}
 
 	// Status + audit
@@ -214,6 +282,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		"changed":    changed,
 		"dryRun":     dry,
 		"durationMs": time.Since(start).Milliseconds(),
+		"removed":    removed,
 	}
 	if f, err := os.OpenFile(r.cfg.AuditLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 		_ = json.NewEncoder(f).Encode(rec)
