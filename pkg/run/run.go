@@ -58,11 +58,10 @@ func (r *Runner) ReadStatus() (status.Status, error) {
 func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	start := time.Now()
 
-	// Refresh inputs.
+	// Refresh inputs each run
 	r.lastFacts = facts.Discover()
 	r.lastTags = loadTags(r.cfg.TagsDir)
 
-	// Sync policies repo.
 	commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
 	if err != nil {
 		return err
@@ -87,7 +86,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			return nil
 		}
 
-		// Peek at kind
+		// Peek kind
 		var hdr struct{ Kind string `yaml:"kind"` }
 		if err := yaml.Unmarshal(b, &hdr); err != nil {
 			r.log.Warn("yaml", err.Error(), "file", path)
@@ -101,11 +100,12 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			if !selector.Sel{
+			sel := selector.Sel{
 				Facts:         p.Selector.Facts,
 				Tags:          p.Selector.Tags,
 				HostnameRegex: p.Selector.HostnameRegex,
-			}.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
+			}
+			if !sel.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
 			js, _, err := pk.Render(&p)
@@ -122,11 +122,12 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			if !selector.Sel{
+			sel := selector.Sel{
 				Facts:         p.Selector.Facts,
 				Tags:          p.Selector.Tags,
 				HostnameRegex: p.Selector.HostnameRegex,
-			}.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
+			}
+			if !sel.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
 			settings, locks, _, _, err := dc.Render(&p)
@@ -148,11 +149,12 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			if !selector.Sel{
+			sel := selector.Sel{
 				Facts:         p.Selector.Facts,
 				Tags:          p.Selector.Tags,
 				HostnameRegex: p.Selector.HostnameRegex,
-			}.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
+			}
+			if !sel.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
 			conf, _, err := mp.Render(&p)
@@ -166,12 +168,12 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				initramfsTouched = true
 			}
 		default:
-			// ignore
+			// ignore unknown kinds
 		}
 		return nil
 	})
 
-	// Apply changes.
+	// Apply changes
 	changed := 0
 	for _, it := range toApply {
 		c, err := r.applyAtomic(it, dry)
@@ -184,7 +186,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		}
 	}
 
-	// Post steps.
+	// Post-steps
 	if !dry && dconfTouched {
 		_ = exec.CommandContext(ctx, "dconf", "update").Run()
 	}
@@ -192,7 +194,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		_ = exec.CommandContext(ctx, "update-initramfs", "-u").Run()
 	}
 
-	// Status + audit.
+	// Status + audit
 	st := status.Status{
 		LastApply: time.Now().UTC().Format(time.RFC3339),
 		Result:    "ok",
@@ -228,7 +230,7 @@ type applyItem struct {
 }
 
 func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
-	// Strict path allow-list.
+	// Strict allow-list of writable paths
 	okPath := strings.HasPrefix(it.Path, "/etc/polkit-1/rules.d/60-lgpo-") ||
 		strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/60-lgpo-") ||
 		strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/locks/60-lgpo-") ||
@@ -237,18 +239,19 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 		return false, fmt.Errorf("path not allowed: %s", it.Path)
 	}
 
-	// Drift check.
+	// Drift check
 	if b, err := os.ReadFile(it.Path); err == nil {
 		if string(b) == string(it.Data) {
 			return false, nil
 		}
 	}
 
+	// Dry-run
 	if dry {
 		return true, nil
 	}
 
-	// Atomic write.
+	// Atomic write
 	if err := os.MkdirAll(filepath.Dir(it.Path), 0o755); err != nil {
 		return false, err
 	}
@@ -267,7 +270,7 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 	return true, nil
 }
 
-// loadTags is an inline tag loader (avoids importing another pkg in the MVP).
+// loadTags is a tiny inline loader to avoid another dependency in the MVP.
 func loadTags(dir string) map[string]string {
 	m := map[string]string{}
 	ents, err := os.ReadDir(dir)
