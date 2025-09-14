@@ -31,6 +31,7 @@ sudo rm -rf "$SRC_DIR"
 sudo mkdir -p "$SRC_DIR"
 sudo chown -R "$(id -u)":"$(id -g)" "$SRC_DIR"
 git clone --depth 1 --branch "$SRC_BRANCH" "$SRC_REPO_URL" "$SRC_DIR"
+cd "$SRC_DIR"
 
 echo "[3/7] Building lgpod..."
 # Make Go module tooling happy
