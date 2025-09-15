@@ -1,0 +1,156 @@
+name: Sync Device Inventory from ZITADEL v2
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "*/30 * * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  GROUP_DEFAULT: laptops
+  ZITADEL_BASE: https://your-zitadel-domain
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Install jq + yq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o yq
+          sudo install -m 0755 yq /usr/local/bin/yq
+
+      - name: Get service token (client credentials)
+        id: token
+        env:
+          TOKEN_URL: ${{ env.ZITADEL_BASE }}/oauth/v2/token
+          CLIENT_ID: ${{ secrets.ZITADEL_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.ZITADEL_CLIENT_SECRET }}
+          SCOPE: ${{ secrets.ZITADEL_SCOPE }} # optional
+        run: |
+          set -euo pipefail
+          TOK_JSON="$(curl -sS -X POST "$TOKEN_URL" \
+            -H 'content-type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=client_credentials' \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET" \
+            ${SCOPE:+--data-urlencode "scope=$SCOPE"})"
+          AT="$(jq -r '.access_token // empty' <<<"$TOK_JSON")"
+          if [ -z "$AT" ]; then echo "No access_token"; echo "$TOK_JSON"; exit 1; fi
+          echo "token=$AT" >> "$GITHUB_OUTPUT"
+
+      - name: Search users (v2)
+        id: users
+        env:
+          AT: ${{ steps.token.outputs.token }}
+          API: ${{ env.ZITADEL_BASE }}/v2/users
+        run: |
+          set -euo pipefail
+          mkdir -p inventory
+          # Minimal search body; add queries/sorting/paging to fit your org size.
+          BODY='{"limit":200}'
+          curl -sS -X POST "$API" \
+            -H "authorization: Bearer $AT" \
+            -H "content-type: application/json" \
+            -d "$BODY" > inventory/users.list.json
+          # Expect an array field; adapt if your tenant wraps results differently.
+          jq '.' inventory/users.list.json >/dev/null
+
+      - name: Fetch metadata for each user (lgpo_device_ids / lgpo_device_tags)
+        id: mds
+        env:
+          AT: ${{ steps.token.outputs.token }}
+          BASE: ${{ env.ZITADEL_BASE }}
+        run: |
+          set -euo pipefail
+          mkdir -p inventory/meta
+          # Extract user IDs from the users list (adjust path if response shape differs)
+          jq -r '..|objects|select(has("id"))|.id' inventory/users.list.json | sort -u > inventory/user_ids.txt
+
+          # Query metadata for each user via POST /v2/users/:id/metadata/search
+          # Adjust the search body to filter to keys you use; some tenants allow empty body to list all.
+          while read -r UID; do
+            curl -sS -X POST "$BASE/v2/users/$UID/metadata/search" \
+              -H "authorization: Bearer $AT" \
+              -H "content-type: application/json" \
+              -d '{}' > "inventory/meta/$UID.json"
+          done < inventory/user_ids.txt
+
+          # Build a flat JSON of device_id -> {identity, tags}
+          jq -n '
+            def kv_map(md):
+              (md.items // md.result // [])    # tolerate different response keys
+              | map({ ( .key // .name // "" ): (.value // .data // "") })
+              | add;
+            def parse_tags(v):
+              try (v | fromjson) catch v;      # allow JSON string or plain string
+            def from_user(u, md):
+              # derive identity label
+              . as $u | md as $md
+              | {
+                  id: ($u.id // "unknown"),
+                  identity: ($u.email // $u.preferredEmail // $u.userName // $u.username // "unknown"),
+                  meta: kv_map($md)
+                };
+            # load users and join metadata files
+            (input | .) as $users
+            | [ $users[] as $u
+                | ($u.id // empty) as $id
+                | ($id|tostring) as $uid
+                | (try (input | fromjson) catch {}) as $md
+                | from_user($u; $md)
+              ]' \
+            < <(jq -c '..|arrays? // empty | select(length>0) | .[]' inventory/users.list.json) \
+            $(for u in $(cat inventory/user_ids.txt); do printf "inventory/meta/%s.json " "$u"; done) \
+          > inventory/joined.json
+
+          # Render devices.yml
+          jq '
+            {
+              apiVersion: "lgpo.io/v1",
+              kind: "DeviceInventory",
+              items:
+                ( [ .[] as $r
+                    | ($r.meta.lgpo_device_ids // "[]" | try (fromjson) catch []) as $ids
+                    | ($r.meta.lgpo_device_tags // "{}" | try (fromjson) catch {}) as $dtag
+                    | $ids[]
+                    | {
+                        device_pub_sha256: .,
+                        identity: $r.identity,
+                        tags:
+                          (
+                            ($dtag[.] // {}) as $dt
+                            | if (env.GROUP_DEFAULT // "") != "" and (($dt.group // empty) | not)
+                              then ($dt + {group: env.GROUP_DEFAULT})
+                              else $dt end
+                          )
+                      }
+                  ]
+                  | unique_by(.device_pub_sha256)
+                  | sort_by(.device_pub_sha256)
+                )
+            }' inventory/joined.json \
+          | yq -P > inventory/devices.yml
+
+          echo "Generated inventory/devices.yml:"
+          sed -n '1,200p' inventory/devices.yml
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(inventory): sync from ZITADEL v2"
+          title: "Sync inventory/devices.yml from ZITADEL v2"
+          body: "Updates inventory from v2 Users + User Metadata."
+          branch: ci/inventory-sync
+          base: main
+          add-paths: |
+            inventory/users.list.json
+            inventory/meta/*.json
+            inventory/devices.yml
