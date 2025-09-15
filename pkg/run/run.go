@@ -87,6 +87,13 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	r.lastFacts = facts.Discover()
 	r.lastTags = loadTags(r.cfg.TagsDir)
 
+	deviceHash, wrote, err := inventory.SyncInventoryTags(cfg.CacheDir, cfg.TagsDir, "/etc/lgpo/device.key")
+	if err != nil {
+    	logger.Printf("inventory: device=%s, error syncing tags from inventory: %v", deviceHash, err)
+	} else {
+    	logger.Printf("inventory: device=%s, wrote %d tag file(s) from inventory", deviceHash, wrote)
+	}
+
 	commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
 	if err != nil {
 		return err
