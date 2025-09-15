@@ -11,12 +11,12 @@ This early MVP version focuses three policy kinds:
 - **ModprobePolicy** → kernel module allow/deny (e.g., block USB mass storage)
 
 ## GitOps configuration management for Linux workstations
-- 🔐 **Change control:** every edit is a PR with history, reviews, and a merge commit you can audit or roll back.  
+- 🔐 **Change control:** every edit is a PR with history, reviews, and a merge commit you can audit.  
 - 👀 **Four-eyes principle & quality gates:** require approvals via CODEOWNERS, enforce status checks (CI, linters, YAML/schema validators, policy render tests) before merge.  
 - 🔁 **Reproducibility:** endpoints apply a specific commit; you can correlate any host’s state with the exact Git SHA.  
 - ⚡️🛡️ **Safety & speed:** shallow fetches keep bandwidth tiny; rendering is side-effect-free until the final atomic write.  
-- ⏪ **Instant rollback:** `git revert` (or restore a previous commit) → agents reset to that state on the next interval.  
-- 🧱 **Smaller attack surface:** no extra policy server or agent-to-controller RPC—agents pull over HTTPS directly from Git; fewer privileged services and credentials to defend.
+- ⏪ **Easy rollback:** `git revert` (or restore a previous commit) → agents reset to that state on the next interval.  
+- 🧱 **Smaller attack surface:** agents pull over HTTPS directly from Git; fewer privileged services and credentials to defend.
 ---
 
 ## Table of contents
