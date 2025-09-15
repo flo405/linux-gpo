@@ -3,15 +3,20 @@
 Windows has **Group Policy Objects (GPOs)**: a centralized way to push policy across fleets.  
 Linux, by contrast, is gloriously diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder—there’s no single **Registry**, and many subsystems each speak their own language.
 
-**lgpo** is a small, security-first answer: a tiny agent (**`lgpod`**) that pulls policies from a Git repo (**GitOps**), written as **YAML**, and renders them into native Linux config systems—safely and predictably.  
-For the MVP we focus on three high-leverage surfaces:
+**lgpo** is a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo and renders them into native Linux config systems. **One policy language** in **YAML** reduces Linux complexity while staying close to OS primitives.
 
+This first MVP versionen focuses three policy kinds:
 - **PolkitPolicy** → controls privileged actions (who can do what)  
 - **DconfPolicy** → GNOME settings + locks (opinionated desktop security)  
 - **ModprobePolicy** → kernel module allow/deny (e.g., block USB mass storage)
 
-The result: **one policy language** that tames Linux complexity while staying close to OS primitives.
-
+## GitOps configuration management for Linux workstations
+- 🔐 **Change control:** every edit is a PR with history, reviews, and a merge commit you can audit or roll back.  
+- 👀 **Four-eyes principle & quality gates:** require approvals via CODEOWNERS, enforce status checks (CI, linters, YAML/schema validators, policy render tests) before merge.  
+- 🔁 **Reproducibility:** endpoints apply a specific commit; you can correlate any host’s state with the exact Git SHA.  
+- ⚡️🛡️ **Safety & speed:** shallow fetches keep bandwidth tiny; rendering is side-effect-free until the final atomic write.  
+- ⏪ **Instant rollback:** `git revert` (or restore a previous commit) → agents reset to that state on the next interval.  
+- 🧱 **Smaller attack surface:** no extra policy server or agent-to-controller RPC—agents pull over HTTPS directly from Git; fewer privileged services and credentials to defend.
 ---
 
 ## Table of contents
