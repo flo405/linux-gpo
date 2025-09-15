@@ -1,0 +1,47 @@
+# inventory/devices.yml
+# Static inventory that maps device public-key hashes to identity and tags.
+# Schema:
+#   apiVersion: lgpo.io/v1
+#   kind: DeviceInventory
+#   items: 
+#     - device_pub_sha256: "<sha256 of device's public key PEM>"
+#       identity: "<owner or label>"
+#       tags:
+#         group: "<laptops|desktops|servers|…>"
+#         ring:  "<canary|beta|stable>"
+#         geo:   "<eu|us|…>"
+#         owner: "<email-or-handle>"
+#
+# Note: keep tag values as short lowercase strings.
+
+apiVersion: lgpo.io/v1
+kind: DeviceInventory
+items:
+  - device_pub_sha256: "1b4c8d9a7e5f3a12b4c6d8e0f1a2b3c4d5e6f7890abc1234def567890abcdef0"
+    identity: "flo@pny.at"
+    tags:
+      group: "laptops"
+      ring:  "canary"
+      geo:   "eu"
+      owner: "flo"
+  - device_pub_sha256: "7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90"
+    identity: "hp@pny.at"
+    tags:
+      group: "laptops"
+      ring:  "stable"
+      geo:   "eu"
+      owner: "hp"
+  - device_pub_sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    identity: "jd@pny.at"
+    tags:
+      group: "desktops"
+      ring:  "beta"
+      geo:   "eu"
+      owner: "john"
+  - device_pub_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    identity: "shared-lab"
+    tags:
+      group: "lab"
+      ring:  "stable"
+      geo:   "eu"
+      owner: "it"
