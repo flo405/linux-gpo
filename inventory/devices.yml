@@ -17,31 +17,29 @@
 apiVersion: lgpo.io/v1
 kind: DeviceInventory
 items:
-  - device_pub_sha256: "1b4c8d9a7e5f3a12b4c6d8e0f1a2b3c4d5e6f7890abc1234def567890abcdef0"
-    identity: "flo@pny.at"
+  - device_pub_sha256: "9634e94913fe94e47fd5dbe9caf4ee48d7b86b21fe10a63b9bd4c41e0ff744f8"
+    identity: "fs@pny.at"
     tags:
       group: "laptops"
-      ring:  "canary"
-      geo:   "eu"
-      owner: "flo"
+      owner: "fs@pny.at"
   - device_pub_sha256: "7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90"
     identity: "hp@pny.at"
     tags:
       group: "laptops"
       ring:  "stable"
       geo:   "eu"
-      owner: "hp"
+      owner: "hp@pny.at"
   - device_pub_sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     identity: "jd@pny.at"
     tags:
       group: "desktops"
       ring:  "beta"
       geo:   "eu"
-      owner: "john"
+      owner: "jd@pny.at"
   - device_pub_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    identity: "shared-lab"
+    identity: "sharedlab@pny.at"
     tags:
       group: "lab"
       ring:  "stable"
       geo:   "eu"
-      owner: "it"
+      owner: "sharedlab@pny.at"
