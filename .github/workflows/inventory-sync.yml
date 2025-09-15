@@ -1,18 +1,19 @@
-name: Sync Device Inventory from ZITADEL v2 (direct-to-main)
+name: Sync Device Inventory from ZITADEL v2 (direct, with PR fallback)
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/30 * * * *"   # every 30 minutes; adjust as needed
+    - cron: "*/30 * * * *"
 
 permissions:
-  contents: write   # needed to push commits
+  contents: write
+  pull-requests: write
 
 env:
   GROUP_DEFAULT: laptops
   ZITADEL_BASE: ${{ secrets.ZITADEL_BASE }}                 # e.g., https://access.pny.at
-  ZITADEL_ORG_DOMAIN: ${{ secrets.ZITADEL_ORG_DOMAIN }}     # optional: your org domain
-  ZITADEL_ORG_ID: ${{ secrets.ZITADEL_ORG_ID }}             # optional: your org ID
+  ZITADEL_ORG_DOMAIN: ${{ secrets.ZITADEL_ORG_DOMAIN }}     # optional
+  ZITADEL_ORG_ID: ${{ secrets.ZITADEL_ORG_ID }}             # optional
 
 jobs:
   inventory:
@@ -20,11 +21,12 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout (full history, keep credentials)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
+          # Use a PAT with "contents:write" if you want to bypass stricter branch protections
+          token: ${{ secrets.BOT_TOKEN || github.token }}
 
       - name: Tooling
         run: |
@@ -53,7 +55,7 @@ jobs:
           mkdir -p inventory/meta
           if [ -z "${TOKEN_URL:-}" ] || [ -z "${CLIENT_ID:-}" ] || [ -z "${CLIENT_SECRET:-}" ]; then
             echo "token=" >> "$GITHUB_OUTPUT"
-            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
+            jq -n '{details:{totalResult:"0"},result:[]}' > inventory/users.list.json
             exit 0
           fi
           TOK_JSON="$(curl -sS -u "$CLIENT_ID:$CLIENT_SECRET" \
@@ -66,7 +68,7 @@ jobs:
             echo "WARN: No access_token from ZITADEL. Writing empty users list and continuing."
             echo "$TOK_JSON" > inventory/token_error.json
             echo "token=" >> "$GITHUB_OUTPUT"
-            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
+            jq -n '{details:{totalResult:"0"},result:[]}' > inventory/users.list.json
             exit 0
           fi
           echo "token=$AT" >> "$GITHUB_OUTPUT"
@@ -82,7 +84,7 @@ jobs:
           set -euo pipefail
           mkdir -p inventory
           if [ -z "${AT:-}" ] || [ -z "${API:-}" ]; then
-            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
+            jq -n '{details:{totalResult:"0"},result:[]}' > inventory/users.list.json
             exit 0
           fi
           BODY='{"limit":200}'
@@ -91,7 +93,7 @@ jobs:
           [ -n "${ORG_ID:-}" ] && HDRS+=(-H "x-zitadel-org-id: $ORG_ID")
           if ! curl -sS -X POST "$API" "${HDRS[@]}" -d "$BODY" > inventory/users.list.json; then
             echo 'WARN: user search failed; falling back to empty list'
-            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
+            jq -n '{details:{totalResult:"0"},result:[]}' > inventory/users.list.json
           fi
           jq -e '.' inventory/users.list.json >/dev/null || echo 'WARN: users.list.json not valid JSON (continuing)'
           echo "Users returned: $(jq -r '.details.totalResult // 0' inventory/users.list.json)"
@@ -115,8 +117,8 @@ jobs:
               HDRS=(-H "authorization: Bearer $AT" -H "content-type: application/json")
               [ -n "${ORG_DOMAIN:-}" ] && HDRS+=(-H "x-zitadel-org-domain: $ORG_DOMAIN")
               [ -n "${ORG_ID:-}" ] && HDRS+=(-H "x-zitadel-org-id: $ORG_ID")
-              curl -sS -X POST "$BASE/v2/users/$UID/metadata/search" "${HDRS[@]}" -d '{}' \
-                > "inventory/meta/$UID.json" || echo '{}' > "inventory/meta/$UID.json"
+              curl -sS -X POST "$BASE/v2/users/$UID/metadata/search" \
+                "${HDRS[@]}" -d '{}' > "inventory/meta/$UID.json" || echo '{}' > "inventory/meta/$UID.json"
             done < inventory/user_ids.txt
           fi
 
@@ -124,7 +126,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Build joined rows: [{userId, identity, meta:{...}}, ...]
           jq -n '
             def kv_map(md):
               (md.result // md.items // [])
@@ -156,7 +157,6 @@ jobs:
 
           echo "Joined rows: $(jq 'length' inventory/joined.json)"
 
-          # Render devices.yml (decode lgpo_device_ids/lgpo_device_tags which are JSON-strings)
           jq '
             {
               apiVersion: "lgpo.io/v1",
@@ -201,17 +201,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Commit & push to main (only if changed)
+      - name: Commit & push to default branch (with fallback to PR)
+        id: push
         env:
-          GIT_AUTHOR_NAME: github-actions[bot]
-          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-          GIT_COMMITTER_NAME: github-actions[bot]
-          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PUSH_TOKEN: ${{ secrets.BOT_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          git fetch origin main
-          git checkout main
-          git pull --rebase origin main
+          BR="${DEFAULT_BRANCH:-main}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "$BR"
+          git checkout "$BR"
+          git pull --rebase origin "$BR"
 
           git add inventory/devices.yml inventory/users.list.json inventory/meta || true
           if git diff --cached --quiet; then
@@ -219,4 +222,26 @@ jobs:
             exit 0
           fi
           git commit -m "chore(inventory): sync from ZITADEL v2 [skip ci]"
-          git push origin HEAD:main
+
+          # Ensure remote uses a token (avoids 'could not read Username' errors)
+          git remote set-url origin "https://x-access-token:${PUSH_TOKEN}@github.com/${{ github.repository }}.git"
+
+          set +e
+          git push --verbose origin HEAD:"$BR"
+          RC=$?
+          set -e
+          echo "rc=$RC" >> "$GITHUB_OUTPUT"
+
+      - name: Create PR (fallback if push failed)
+        if: steps.push.outputs.rc != '0'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "Sync inventory/devices.yml (fallback PR)"
+          body: "Direct push failed (likely branch protection). This PR contains the inventory update."
+          commit-message: "chore(inventory): sync from ZITADEL v2"
+          branch: ci/inventory-sync
+          base: ${{ github.event.repository.default_branch }}
+          add-paths: |
+            inventory/devices.yml
+            inventory/users.list.json
+            inventory/meta
