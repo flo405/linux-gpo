@@ -22,7 +22,7 @@ LockPersonality=yes
 SystemCallFilter=@system-service
 CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN CAP_SYS_ADMIN
 AmbientCapabilities=
-ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo
+ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo /etc/lgpo/tags.d
 StateDirectory=lgpo
 LogsDirectory=lgpo
 
