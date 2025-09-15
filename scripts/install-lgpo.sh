@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # set -euo pipefail
 
-# --- Tunables (override via env) ---
+# ============================================================
+# Tunables (override via env)
+# ============================================================
 SRC_REPO_URL="${SRC_REPO_URL:-https://github.com/flo405/linux-gpo.git}"
 SRC_BRANCH="${SRC_BRANCH:-main}"
 POLICY_REPO_URL="${POLICY_REPO_URL:-$SRC_REPO_URL}"
@@ -11,120 +13,123 @@ POLICY_BRANCH="${POLICY_BRANCH:-$SRC_BRANCH}"
 SRC_DIR="${SRC_DIR:-/opt/lgpo/src}"
 BIN="${BIN:-/usr/local/bin/lgpod}"
 SYSTEMD_UNIT="${SYSTEMD_UNIT:-/etc/systemd/system/lgpod.service}"
-CONFIG_DIR="${CONFIG_DIR:-/etc/lgpo}"
-CONFIG="${CONFIG:-$CONFIG_DIR/agent.yaml}"
-TAGS_DIR="${TAGS_DIR:-$CONFIG_DIR/tags.d}"
+CONFIG="${CONFIG:-/etc/lgpo/agent.yaml}"
+TAGS_DIR="${TAGS_DIR:-/etc/lgpo/tags.d}"
+CACHE_DIR="${CACHE_DIR:-/var/lib/lgpo/repo}"
 STATE_DIR="${STATE_DIR:-/var/lib/lgpo}"
-CACHE_DIR="${CACHE_DIR:-$STATE_DIR/repo}"
 LOG_DIR="${LOG_DIR:-/var/log/lgpo}"
+DEVICE_DIR="${DEVICE_DIR:-/etc/lgpo}"
+DEVICE_KEY="${DEVICE_KEY:-$DEVICE_DIR/device.key}"
+DEVICE_PUB="${DEVICE_PUB:-$DEVICE_DIR/device.pub}"
+DEVICE_HASH_FILE="${DEVICE_HASH_FILE:-$DEVICE_DIR/device.pub.sha256}"
 
-umask 027
+# Behavior flags
+LGPO_NONINTERACTIVE="${LGPO_NONINTERACTIVE:-0}"   # set 1 to skip prompts
+LGPO_REGEN_KEY="${LGPO_REGEN_KEY:-ask}"           # ask|yes|no (yes=force regen, no=keep existing)
 
-# ---- 1) Prereqs -------------------------------------------------------------
+# ============================================================
+# Root check
+# ============================================================
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+  echo "Please run as root (use sudo)."
+  exit 1
+fi
+
+# ============================================================
+# 1) Prereqs
+# ============================================================
 echo "[1/8] Installing prerequisites..."
 if command -v apt-get >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  sudo apt-get update -y
-  sudo apt-get install -y --no-install-recommends \
+  apt-get update -y
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     git ca-certificates curl build-essential pkg-config golang-go \
-    dconf-cli policykit-1 initramfs-tools
+    dconf-cli policykit-1 initramfs-tools openssl jq
 else
-  echo "This installer targets Debian/Ubuntu (apt-get)."; exit 1
+  echo "This script targets Debian/Ubuntu (apt)."
+  exit 1
 fi
 
-# ---- 2) System group --------------------------------------------------------
-echo "[2/8] Ensuring system group 'lgpo' exists..."
-if ! getent group lgpo >/dev/null; then
-  sudo groupadd --system lgpo
-fi
-
-# ---- 3) Clone & build -------------------------------------------------------
-echo "[3/8] Cloning ${SRC_REPO_URL}@${SRC_BRANCH} and building..."
-sudo rm -rf "$SRC_DIR"
-sudo install -d -o "$(id -u)" -g "$(id -g)" -m 0700 "$SRC_DIR"
+# ============================================================
+# 2) Fetch source & build
+# ============================================================
+echo "[2/8] Cloning source from ${SRC_REPO_URL} (branch ${SRC_BRANCH})..."
+rm -rf "$SRC_DIR"
+install -d -m 0750 "$SRC_DIR"
+chown root:root "$SRC_DIR"
 git clone --depth 1 --branch "$SRC_BRANCH" "$SRC_REPO_URL" "$SRC_DIR"
 cd "$SRC_DIR"
 
-# Go env (quietly tolerate older Go)
+echo "[3/8] Building lgpod..."
 export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 export GOSUMDB="${GOSUMDB:-sum.golang.org}"
-export GOFLAGS="${GOFLAGS:-}"
-export GOFLAGS="${GOFLAGS/-mod=readonly/}"
 go env -w GOPROXY="$GOPROXY" >/dev/null 2>&1 || true
 go env -w GOSUMDB="$GOSUMDB" >/dev/null 2>&1 || true
 
+# Make modules happy, even on first install
 GO111MODULE=on go mod tidy
 GO111MODULE=on go mod download
+
 go build -o lgpod ./cmd/lgpod
+# Least privilege: binary 0750 (root + group can exec). Use group 'sudo' if present, else root.
+BIN_GROUP="root"
+getent group sudo >/dev/null 2>&1 && BIN_GROUP="sudo"
+install -o root -g "$BIN_GROUP" -m 0750 ./lgpod "$BIN"
 
-# Binary: root:lgpo 0750 (not world-executable)
-sudo install -o root -g lgpo -m 0750 ./lgpod "$BIN"
-
-# ---- 4) Hardened systemd unit ----------------------------------------------
-echo "[4/8] Installing hardened systemd unit..."
-sudo tee "$SYSTEMD_UNIT" >/dev/null <<'EOF'
+# ============================================================
+# 3) Systemd unit
+# ============================================================
+echo "[4/8] Installing systemd unit..."
+if [ -f "packaging/systemd/lgpod.service" ]; then
+  install -m 0644 packaging/systemd/lgpod.service "$SYSTEMD_UNIT"
+else
+  tee "$SYSTEMD_UNIT" >/dev/null <<'EOF'
 [Unit]
 Description=lgpo agent (lgpod)
-Documentation=https://github.com/flo405/linux-gpo
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=lgpo
-UMask=0077
-Environment=GIT_CONFIG_GLOBAL=/dev/null
 ExecStart=/usr/local/bin/lgpod --sub run --config=/etc/lgpo/agent.yaml
 Restart=always
 RestartSec=10
-
-# Hardening
+# Hardening (paths must be writable via ReadWritePaths)
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
-PrivateDevices=yes
 ProtectHostname=yes
 ProtectClock=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
-ProtectControlGroups=yes
+RestrictSUIDSGID=yes
 LockPersonality=yes
 SystemCallFilter=@system-service
-SystemCallArchitectures=native
-RestrictSUIDSGID=yes
-RestrictRealtime=yes
-MemoryDenyWriteExecute=yes
-RestrictNamespaces=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=
 AmbientCapabilities=
-ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo
-
-# Let systemd create these as root:lgpo with tight modes
+ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo /etc/lgpo
 StateDirectory=lgpo
-StateDirectoryMode=0750
 LogsDirectory=lgpo
-LogsDirectoryMode=0750
+# Service runs as root (MVP). Consider a dedicated user later.
 
 [Install]
 WantedBy=multi-user.target
 EOF
-sudo chmod 0644 "$SYSTEMD_UNIT"
-sudo systemctl daemon-reload
+fi
+systemctl daemon-reload
 
-# ---- 5) Config & dirs (least privilege) ------------------------------------
-echo "[5/8] Creating config and directories..."
-sudo install -d -o root -g root -m 0750 "$CONFIG_DIR"
-sudo install -d -o root -g root -m 0750 "$TAGS_DIR"
-sudo install -d -o root -g lgpo -m 0750 "$STATE_DIR"
-sudo install -d -o root -g lgpo -m 0700 "$CACHE_DIR"
-sudo install -d -o root -g lgpo -m 0750 "$LOG_DIR"
+# ============================================================
+# 4) Config & directories (least privilege)
+# ============================================================
+echo "[5/8] Writing config & creating directories..."
+install -d -m 0750 "$(dirname "$CONFIG")" "$TAGS_DIR" "$STATE_DIR" "$LOG_DIR" "$CACHE_DIR"
+chown -R root:root /etc/lgpo "$STATE_DIR" "$LOG_DIR" "$CACHE_DIR"
+chmod 0750 /etc/lgpo "$TAGS_DIR" "$STATE_DIR" "$CACHE_DIR"
+chmod 0750 "$LOG_DIR" || true
 
 if [ ! -f "$CONFIG" ]; then
-  sudo tee "$CONFIG" >/dev/null <<EOF
+  tee "$CONFIG" >/dev/null <<EOF
 repo: ${POLICY_REPO_URL}
 branch: ${POLICY_BRANCH}
 policiesPath: policies
@@ -135,56 +140,86 @@ auditLog: ${LOG_DIR}/audit.jsonl
 statusFile: ${STATE_DIR}/status.json
 cacheDir: ${CACHE_DIR}
 EOF
-  sudo chmod 0600 "$CONFIG"
-  sudo chown root:root "$CONFIG"
+  chmod 0640 "$CONFIG"
 fi
 
-# ---- 6) Prefetch policy repo (shallow, secure perms) ------------------------
-echo "[6/8] Prefetching policies to ${CACHE_DIR}..."
+# Prefetch policies (not required, but nice)
 if [ -d "$CACHE_DIR/.git" ]; then
-  sudo git -C "$CACHE_DIR" fetch --depth 1 origin "$POLICY_BRANCH"
-  sudo git -C "$CACHE_DIR" reset --hard "origin/${POLICY_BRANCH}"
+  git -C "$CACHE_DIR" fetch --depth 1 origin "$POLICY_BRANCH" || true
+  git -C "$CACHE_DIR" reset --hard "origin/${POLICY_BRANCH}" || true
 else
-  sudo git clone --depth 1 --branch "$POLICY_BRANCH" "$POLICY_REPO_URL" "$CACHE_DIR"
-fi
-sudo chown -R root:root "$CACHE_DIR"
-sudo find "$CACHE_DIR" -type d -exec chmod 0700 {} \;
-sudo find "$CACHE_DIR" -type f -exec chmod 0600 {} \;
-sudo git -C "$CACHE_DIR" rev-parse HEAD || true
-
-# ---- 7) Enable service + one-shot dry run ----------------------------------
-echo "[7/8] Enabling service & performing dry run..."
-sudo systemctl enable --now lgpod || true
-sudo "$BIN" --sub run --once --dry-run || true
-
-# ---- 8) Tighten state/log files (if created) --------------------------------
-echo "[8/8] Finalizing file permissions..."
-if [ -f "${STATE_DIR}/status.json" ]; then
-  sudo chown root:lgpo "${STATE_DIR}/status.json"
-  sudo chmod 0640 "${STATE_DIR}/status.json"
-fi
-if [ -f "${LOG_DIR}/audit.jsonl" ]; then
-  sudo chown root:lgpo "${LOG_DIR}/audit.jsonl"
-  sudo chmod 0640 "${LOG_DIR}/audit.jsonl"
+  git clone --depth 1 --branch "$POLICY_BRANCH" "$POLICY_REPO_URL" "$CACHE_DIR" || true
 fi
 
-# final restart
-sudo systemctl restart lgpod 
+# ============================================================
+# 5) Device identity: create /etc/lgpo/device.key (Ed25519), pub, hash
+# ============================================================
+echo "[6/8] Ensuring device key exists at $DEVICE_KEY ..."
+generate_key() {
+  umask 0177
+  install -d -m 0750 "$DEVICE_DIR"
+  # Generate Ed25519 private key
+  openssl genpkey -algorithm Ed25519 -out "$DEVICE_KEY"
+  chmod 0600 "$DEVICE_KEY"
+  chown root:root "$DEVICE_KEY"
+  # Extract public key (PEM)
+  openssl pkey -in "$DEVICE_KEY" -pubout -out "$DEVICE_PUB"
+  chmod 0640 "$DEVICE_PUB"
+  chown root:root "$DEVICE_PUB"
+}
 
-echo "Done ✅
-- Binary:     $BIN (root:lgpo, 0750)
-- Unit:       $SYSTEMD_UNIT (enabled)
-- Config:     $CONFIG (0600, root:root)
-- Tags dir:   $TAGS_DIR (0750, root:root)
-- State dir:  $STATE_DIR (0750, root:lgpo)
-- Cache dir:  $CACHE_DIR (0700, root:root)
-- Log dir:    $LOG_DIR (0750, root:lgpo)
+if [ -f "$DEVICE_KEY" ]; then
+  case "$LGPO_REGEN_KEY" in
+    yes)
+      echo "LGPO_REGEN_KEY=yes → regenerating device key (existing key will be replaced)."
+      generate_key
+      ;;
+    no)
+      echo "LGPO_REGEN_KEY=no → keeping existing device key."
+      ;;
+    *)
+      if [ "$LGPO_NONINTERACTIVE" = "1" ]; then
+        echo "Non-interactive mode; keeping existing device key."
+      else
+        echo "A device key already exists at $DEVICE_KEY."
+        read -r -p "Keep existing key? [K]eep/[R]egenerate (default: K): " reply || true
+        case "${reply:-K}" in
+          r|R) generate_key ;;
+          *)   echo "Keeping existing key." ;;
+        esac
+      fi
+      ;;
+  esac
+else
+  generate_key
+fi
 
-Tip: add an admin to the 'lgpo' group to read status/logs:
-  sudo usermod -aG lgpo <adminuser>
-Run: 
-  sudo systemctl status lgpod
-  sudo lgpod --sub tags
-  sudo lgpod --sub status
-  sudo cat /var/lib/lgpo/managed.json
-"
+# Compute SHA-256 of public key (PEM) → device ID
+DEVICE_HASH="$(openssl pkey -in "$DEVICE_KEY" -pubout -outform PEM | sha256sum | awk '{print $1}')"
+printf '%s\n' "$DEVICE_HASH" > "$DEVICE_HASH_FILE"
+chmod 0640 "$DEVICE_HASH_FILE"
+chown root:root "$DEVICE_HASH_FILE"
+
+# ============================================================
+# 6) Enable service & dry-run once
+# ============================================================
+echo "[7/8] Enabling lgpod service & doing a dry-run..."
+systemctl enable --now lgpod || true
+"$BIN" --sub run --once --dry-run || true
+
+# ============================================================
+# 7) Done — print the device hash clearly
+# ============================================================
+echo "[8/8] Installation complete."
+echo
+echo "LGPO device ID (SHA-256 of public key PEM):"
+echo "  $DEVICE_HASH"
+echo
+echo "Files:"
+echo "  Private key : $DEVICE_KEY (0600 root:root)"
+echo "  Public key  : $DEVICE_PUB (0640 root:root)"
+echo "  Hash file   : $DEVICE_HASH_FILE (0640 root:root)"
+echo
+echo "Next steps:"
+echo "  1) Add this device ID to your repo's inventory/devices.yml with desired tags."
+echo "  2) Run:  sudo lgpod --sub run --once   # to apply policies immediately"
