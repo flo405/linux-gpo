@@ -1,23 +1,26 @@
-name: Sync Device Inventory from ZITADEL v2 (direct to main, resilient)
+name: Sync Device Inventory from ZITADEL v2 (direct-to-main)
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/30 * * * *"   # every 30 minutes; adjust as needed
 
 permissions:
-  contents: write   # needed to push
+  contents: write   # needed to push commits
 
 env:
   GROUP_DEFAULT: laptops
-  ZITADEL_BASE: ${{ secrets.ZITADEL_BASE }}   # e.g. https://your-tenant.zitadel.cloud
+  ZITADEL_BASE: ${{ secrets.ZITADEL_BASE }}                 # e.g., https://access.pny.at
+  ZITADEL_ORG_DOMAIN: ${{ secrets.ZITADEL_ORG_DOMAIN }}     # optional: your org domain
+  ZITADEL_ORG_ID: ${{ secrets.ZITADEL_ORG_ID }}             # optional: your org ID
 
 jobs:
   inventory:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
     steps:
-      - name: Checkout (full history)
+      - name: Checkout (full history, keep credentials)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -44,107 +47,123 @@ jobs:
           TOKEN_URL: ${{ env.ZITADEL_BASE }}/oauth/v2/token
           CLIENT_ID: ${{ secrets.ZITADEL_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.ZITADEL_CLIENT_SECRET }}
-          SCOPE: ${{ secrets.ZITADEL_SCOPE }} # e.g. openid profile urn:zitadel:iam:org:project:id:zitadel:aud
+          SCOPE: ${{ secrets.ZITADEL_SCOPE }}  # e.g.: openid profile urn:zitadel:iam:org:project:id:zitadel:aud
         run: |
           set -euo pipefail
           mkdir -p inventory/meta
           if [ -z "${TOKEN_URL:-}" ] || [ -z "${CLIENT_ID:-}" ] || [ -z "${CLIENT_SECRET:-}" ]; then
             echo "token=" >> "$GITHUB_OUTPUT"
-            echo '{"users":[]}' > inventory/users.list.json
+            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
             exit 0
           fi
-          TOK_JSON="$(curl -sS -X POST "$TOKEN_URL" \
+          TOK_JSON="$(curl -sS -u "$CLIENT_ID:$CLIENT_SECRET" \
             -H 'content-type: application/x-www-form-urlencoded' \
             --data-urlencode 'grant_type=client_credentials' \
-            --data-urlencode "client_id=$CLIENT_ID" \
-            --data-urlencode "client_secret=$CLIENT_SECRET" \
-            ${SCOPE:+--data-urlencode "scope=$SCOPE"} || true)"
+            ${SCOPE:+--data-urlencode "scope=$SCOPE"} \
+            "$TOKEN_URL" || true)"
           AT="$(jq -r '.access_token // empty' <<<"$TOK_JSON")" || AT=""
           if [ -z "$AT" ]; then
             echo "WARN: No access_token from ZITADEL. Writing empty users list and continuing."
             echo "$TOK_JSON" > inventory/token_error.json
             echo "token=" >> "$GITHUB_OUTPUT"
-            echo '{"users":[]}' > inventory/users.list.json
+            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
             exit 0
           fi
           echo "token=$AT" >> "$GITHUB_OUTPUT"
 
       - name: Search users (POST /v2/users)
-        if: always()
+        id: users
         env:
           AT: ${{ steps.token.outputs.token }}
           API: ${{ env.ZITADEL_BASE }}/v2/users
+          ORG_DOMAIN: ${{ env.ZITADEL_ORG_DOMAIN }}
+          ORG_ID: ${{ env.ZITADEL_ORG_ID }}
         run: |
           set -euo pipefail
+          mkdir -p inventory
           if [ -z "${AT:-}" ] || [ -z "${API:-}" ]; then
-            echo '{"users":[]}' > inventory/users.list.json
+            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
             exit 0
           fi
           BODY='{"limit":200}'
-          if ! curl -sS -X POST "$API" \
-              -H "authorization: Bearer $AT" \
-              -H "content-type: application/json" \
-              -d "$BODY" > inventory/users.list.json; then
+          HDRS=(-H "authorization: Bearer $AT" -H "content-type: application/json")
+          [ -n "${ORG_DOMAIN:-}" ] && HDRS+=(-H "x-zitadel-org-domain: $ORG_DOMAIN")
+          [ -n "${ORG_ID:-}" ] && HDRS+=(-H "x-zitadel-org-id: $ORG_ID")
+          if ! curl -sS -X POST "$API" "${HDRS[@]}" -d "$BODY" > inventory/users.list.json; then
             echo 'WARN: user search failed; falling back to empty list'
-            echo '{"users":[]}' > inventory/users.list.json
+            echo '{"details":{"totalResult":"0"},"result":[]}' > inventory/users.list.json
           fi
           jq -e '.' inventory/users.list.json >/dev/null || echo 'WARN: users.list.json not valid JSON (continuing)'
+          echo "Users returned: $(jq -r '.details.totalResult // 0' inventory/users.list.json)"
 
       - name: Fetch per-user metadata (POST /v2/users/:id/metadata/search)
-        if: always()
         env:
           AT: ${{ steps.token.outputs.token }}
           BASE: ${{ env.ZITADEL_BASE }}
+          ORG_DOMAIN: ${{ env.ZITADEL_ORG_DOMAIN }}
+          ORG_ID: ${{ env.ZITADEL_ORG_ID }}
         run: |
           set -euo pipefail
           : > inventory/user_ids.txt
-          # Try common shapes: array of users or wrapped
-          jq -r '
-            if type=="object" and .users then .users[]? else .[]? end
-            | .id // empty' inventory/users.list.json 2>/dev/null \
-            | sort -u > inventory/user_ids.txt || true
+          jq -r '.result[]?.userId' inventory/users.list.json 2>/dev/null | sort -u > inventory/user_ids.txt || true
+          COUNT=$(wc -l < inventory/user_ids.txt | tr -d ' ')
+          echo "User IDs to fetch metadata for: $COUNT"
 
-          if [ -s inventory/user_ids.txt ] && [ -n "${AT:-}" ] && [ -n "${BASE:-}" ]; then
+          if [ "$COUNT" -gt 0 ] && [ -n "${AT:-}" ] && [ -n "${BASE:-}" ]; then
             while read -r UID; do
               [ -z "$UID" ] && continue
-              curl -sS -X POST "$BASE/v2/users/$UID/metadata/search" \
-                -H "authorization: Bearer $AT" \
-                -H "content-type: application/json" \
-                -d '{}' > "inventory/meta/$UID.json" || echo '{}' > "inventory/meta/$UID.json"
+              HDRS=(-H "authorization: Bearer $AT" -H "content-type: application/json")
+              [ -n "${ORG_DOMAIN:-}" ] && HDRS+=(-H "x-zitadel-org-domain: $ORG_DOMAIN")
+              [ -n "${ORG_ID:-}" ] && HDRS+=(-H "x-zitadel-org-id: $ORG_ID")
+              curl -sS -X POST "$BASE/v2/users/$UID/metadata/search" "${HDRS[@]}" -d '{}' \
+                > "inventory/meta/$UID.json" || echo '{}' > "inventory/meta/$UID.json"
             done < inventory/user_ids.txt
           fi
 
-      - name: Join & render inventory/devices.yml
+      - name: Join & render inventory/devices.yml (decode base64 metadata)
         run: |
           set -euo pipefail
-          # Build a minimal join; tolerate missing/empty files
+
+          # Build joined rows: [{userId, identity, meta:{...}}, ...]
           jq -n '
-            def kv_map(md): (md.items // md.result // []) | map({ ( .key // .name // "" ): (.value // .data // "") }) | add;
-            def norm_user(u): { id: (u.id // "unknown"), identity: (u.email // u.preferredEmail // u.userName // u.username // "unknown") };
+            def kv_map(md):
+              (md.result // md.items // [])
+              | map({ ( .key // .name // "" ): ( try (.value | @base64d) catch (.value // "") ) })
+              | add;
 
-            # Load users (either {users:[...]} or raw array)
-            def load_users:
-              (try (input | .users) catch (input)) // [];
+            def norm_user(u):
+              {
+                userId: (u.userId // "unknown"),
+                identity: (
+                  u.human.email.email
+                  // u.preferredLoginName
+                  // u.username
+                  // u.machine.name
+                  // "unknown"
+                )
+              };
 
-            (load_users) as $U
+            (input | .result // []) as $U
             | [ $U[]? as $u
-                | ($u.id // empty) as $id
-                | ($id|tostring) as $uid
+                | ($u.userId // empty) as $uid
                 | (try (input | fromjson) catch {}) as $md
                 | (norm_user($u) + {meta: kv_map($md)})
               ]
           ' \
-          < <(cat inventory/users.list.json 2>/dev/null || echo '[]') \
-          $(for u in $(cat inventory/user_ids.txt 2>/dev/null || true); do printf "inventory/meta/%s.json " "$u"; done) \
+          < inventory/users.list.json \
+          $(for u in $(jq -r '.result[]?.userId' inventory/users.list.json | sort -u); do printf "inventory/meta/%s.json " "$u"; done) \
           > inventory/joined.json || echo '[]' > inventory/joined.json
 
+          echo "Joined rows: $(jq 'length' inventory/joined.json)"
+
+          # Render devices.yml (decode lgpo_device_ids/lgpo_device_tags which are JSON-strings)
           jq '
             {
               apiVersion: "lgpo.io/v1",
               kind: "DeviceInventory",
               items:
                 ( [ .[] as $r
-                    | ($r.meta.lgpo_device_ids // "[]" | try (fromjson) catch []) as $ids
+                    | ($r.meta.lgpo_device_ids // "[]"  | try (fromjson) catch []) as $ids
                     | ($r.meta.lgpo_device_tags // "{}" | try (fromjson) catch {}) as $dtag
                     | $ids[]
                     | {
@@ -165,10 +184,10 @@ jobs:
             }' inventory/joined.json \
           | yq -P > inventory/devices.yml
 
-          echo "devices.yml generated:"
+          echo "devices.yml preview:"
           sed -n '1,200p' inventory/devices.yml || true
 
-      - name: Upload raw data (for debugging)
+      - name: Upload debug artifact (optional)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -190,7 +209,6 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -euo pipefail
-          # Ensure we can fast-forward push
           git fetch origin main
           git checkout main
           git pull --rebase origin main
