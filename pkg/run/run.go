@@ -15,15 +15,15 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/flo405/linux-gpo/pkg/config"
+	dc "github.com/flo405/linux-gpo/pkg/dconf"
 	"github.com/flo405/linux-gpo/pkg/facts"
 	"github.com/flo405/linux-gpo/pkg/git"
+	"github.com/flo405/linux-gpo/pkg/inventory"
 	lglog "github.com/flo405/linux-gpo/pkg/log"
-	"github.com/flo405/linux-gpo/pkg/selector"
-	"github.com/flo405/linux-gpo/pkg/status"
-
-	dc "github.com/flo405/linux-gpo/pkg/dconf"
 	mp "github.com/flo405/linux-gpo/pkg/modprobe"
 	pk "github.com/flo405/linux-gpo/pkg/polkit"
+	"github.com/flo405/linux-gpo/pkg/selector"
+	"github.com/flo405/linux-gpo/pkg/status"
 )
 
 type managedItem struct {
@@ -41,7 +41,9 @@ func (r *Runner) managedPath() string {
 func (r *Runner) loadManaged() managedState {
 	var s managedState
 	b, err := os.ReadFile(r.managedPath())
-	if err != nil { return s }
+	if err != nil {
+		return s
+	}
 	_ = json.Unmarshal(b, &s)
 	return s
 }
@@ -83,28 +85,38 @@ func (r *Runner) ReadStatus() (status.Status, error) {
 func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	start := time.Now()
 
-	// Refresh inputs each run
+	// 1) Refresh facts each run
 	r.lastFacts = facts.Discover()
-	r.lastTags = loadTags(r.cfg.TagsDir)
 
-	deviceHash, wrote, err := inventory.SyncInventoryTags(cfg.CacheDir, cfg.TagsDir, "/etc/lgpo/device.key")
-	if err != nil {
-    	logger.Printf("inventory: device=%s, error syncing tags from inventory: %v", deviceHash, err)
-	} else {
-    	logger.Printf("inventory: device=%s, wrote %d tag file(s) from inventory", deviceHash, wrote)
-	}
-
+	// 2) Ensure the repo cache is up-to-date (policies + inventory)
 	commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
 	if err != nil {
 		return err
 	}
 
+	// 3) Sync inventory → write authoritative tags from inventory/devices.yml
+	deviceHash, wrote, invErr := inventory.SyncInventoryTags(
+		r.cfg.CacheDir,
+		r.cfg.TagsDir,
+		"/etc/lgpo/device.key",
+	)
+	if invErr != nil {
+		r.log.Warn("inventory", invErr.Error(), "device", deviceHash)
+	} else {
+		// optional info log if your logger supports Info; fallback to Warn with a friendly message
+		r.log.Warn("inventory", "synced", "device", deviceHash, "wrote", fmt.Sprintf("%d", wrote))
+	}
+
+	// 4) Load tags AFTER syncing inventory so policy logic sees fresh tags
+	r.lastTags = loadTags(r.cfg.TagsDir)
+
+	// 5) Evaluate policies
 	polDir := filepath.Join(r.cfg.CacheDir, r.cfg.PoliciesDir())
 
 	var toApply []applyItem
 	dconfTouched := false
 	initramfsTouched := false
-	
+
 	desiredPaths := map[string]struct{}{}
 	desiredManaged := make([]managedItem, 0, 64)
 
@@ -174,8 +186,8 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			}
 			sp, lp := dc.TargetPaths(p.Metadata.Name)
 			toApply = append(toApply,
-    			applyItem{Path: sp, Data: settings, Mode: 0o644},
-    			applyItem{Path: lp, Data: locks, Mode: 0o644},
+				applyItem{Path: sp, Data: settings, Mode: 0o644},
+				applyItem{Path: lp, Data: locks, Mode: 0o644},
 			)
 			desiredPaths[sp] = struct{}{}
 			desiredPaths[lp] = struct{}{}
@@ -205,44 +217,47 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			toApply = append(toApply, applyItem{Path: tgt, Data: conf, Mode: 0o644})
 			desiredPaths[tgt] = struct{}{}
 			desiredManaged = append(desiredManaged, managedItem{Path: tgt})
-			if p.Spec.UpdateInitramfs { initramfsTouched = true }
+			if p.Spec.UpdateInitramfs {
+				initramfsTouched = true
+			}
 
 		default:
 			// ignore unknown kinds
 		}
 		return nil
 	})
+
 	prev := r.loadManaged()
 	removed := 0
 
 	for _, it := range prev.Items {
-    	// only delete files we own and ONLY under our allowlist
-    	path := it.Path
-    	if _, stillDesired := desiredPaths[path]; stillDesired {
-        	continue
-    	}
-    	allowed := strings.HasPrefix(path, "/etc/polkit-1/rules.d/60-lgpo-") ||
-        	strings.HasPrefix(path, "/etc/dconf/db/local.d/60-lgpo-") ||
-        	strings.HasPrefix(path, "/etc/dconf/db/local.d/locks/60-lgpo-") ||
-        	strings.HasPrefix(path, "/etc/modprobe.d/60-lgpo-")
-    	if !allowed {
-        	continue
-    	}
-    	// drift-safe: only remove if file actually exists and looks managed
-    	if _, err := os.Stat(path); err == nil {
-        	if dry {
-            	removed++
-        	} else {
-            	_ = os.Remove(path)
-            	removed++
-            	if strings.HasPrefix(path, "/etc/dconf/db/local.d/") {
-                	dconfTouched = true
-            	}
-            	if strings.HasPrefix(path, "/etc/modprobe.d/") {
-                	initramfsTouched = true
-            	}
-        	}
-    	}
+		// only delete files we own and ONLY under our allowlist
+		path := it.Path
+		if _, stillDesired := desiredPaths[path]; stillDesired {
+			continue
+		}
+		allowed := strings.HasPrefix(path, "/etc/polkit-1/rules.d/60-lgpo-") ||
+			strings.HasPrefix(path, "/etc/dconf/db/local.d/60-lgpo-") ||
+			strings.HasPrefix(path, "/etc/dconf/db/local.d/locks/60-lgpo-") ||
+			strings.HasPrefix(path, "/etc/modprobe.d/60-lgpo-")
+		if !allowed {
+			continue
+		}
+		// drift-safe: only remove if file actually exists
+		if _, err := os.Stat(path); err == nil {
+			if dry {
+				removed++
+			} else {
+				_ = os.Remove(path)
+				removed++
+				if strings.HasPrefix(path, "/etc/dconf/db/local.d/") {
+					dconfTouched = true
+				}
+				if strings.HasPrefix(path, "/etc/modprobe.d/") {
+					initramfsTouched = true
+				}
+			}
+		}
 	}
 
 	// Apply changes
@@ -266,7 +281,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		_ = exec.CommandContext(ctx, "update-initramfs", "-u").Run()
 	}
 	if !dry {
-   		r.saveManaged(desiredManaged)
+		r.saveManaged(desiredManaged)
 	}
 
 	// Status + audit
@@ -337,35 +352,4 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 	}
 	if err := os.Chmod(tmp, it.Mode); err != nil {
 		_ = os.Remove(tmp)
-		return false, err
-	}
-	if err := os.Rename(tmp, it.Path); err != nil {
-		_ = os.Remove(tmp)
-		return false, err
-	}
-	return true, nil
-}
-
-// loadTags is a tiny inline loader to avoid another dependency in the MVP.
-func loadTags(dir string) map[string]string {
-	m := map[string]string{}
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		return m
-	}
-	for _, e := range ents {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".tag") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, name))
-		if err == nil {
-			k := strings.TrimSuffix(name, ".tag")
-			m[k] = strings.TrimSpace(string(b))
-		}
-	}
-	return m
-}
+		return false
