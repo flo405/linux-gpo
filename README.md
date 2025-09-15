@@ -78,7 +78,6 @@ This installs:
 ### Put this device in the **laptops** group (tag)
 
 ```bash
-sudo install -d -m 0755 /etc/lgpo/tags.d
 echo laptops | sudo tee /etc/lgpo/tags.d/group.tag
 ```
 
