@@ -206,7 +206,7 @@ chown root:root "$DEVICE_HASH_FILE"
 echo "[7/8] Enabling lgpod service & doing a dry-run..."
 systemctl enable --now lgpod || true
 "$BIN" --sub run --once --dry-run || true
-
+sudo systemctl restart lgpod
 # ============================================================
 # 7) Done — print the device hash clearly
 # ============================================================
