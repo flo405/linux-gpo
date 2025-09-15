@@ -1,4 +1,4 @@
-# lgpo — Group Policy, reimagined for Linux (with GitOps)
+# lgpo — Linux Group Policy Objects, reimagined with GitOps
 
 Windows has **Group Policy Objects (GPOs)**: a centralized way to push policy across fleets.  
 Linux, by contrast, is gloriously diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder—there’s no single **Registry**, and many subsystems each speak their own language.
@@ -232,7 +232,7 @@ sudo systemctl restart lgpod
 
 ---
 
-## CLI you’ll use a lot
+## CLI 
 
 ```bash
 # Current facts
