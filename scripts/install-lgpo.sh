@@ -134,8 +134,8 @@ repo: ${POLICY_REPO_URL}
 branch: ${POLICY_BRANCH}
 policiesPath: policies
 tagsDir: ${TAGS_DIR}
-interval: 15m
-jitter: 3m
+interval: 5m
+jitter: 1m
 auditLog: ${LOG_DIR}/audit.jsonl
 statusFile: ${STATE_DIR}/status.json
 cacheDir: ${CACHE_DIR}
