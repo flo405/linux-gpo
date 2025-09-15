@@ -1,51 +1,56 @@
-name: Sync Device Inventory from ZITADEL v2 (direct to main)
+name: Sync Device Inventory from ZITADEL v2 (direct to main, resilient)
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "*/30 * * * *"   # every 30 minutes; adjust as needed
+    - cron: "*/30 * * * *"
 
 permissions:
-  contents: write   # required to push commits
+  contents: write   # needed to push
 
 env:
   GROUP_DEFAULT: laptops
-  # Put your base URL in a repo/Org Variable or Secret (e.g., https://your-tenant.zitadel.cloud)
-  ZITADEL_BASE: ${{ secrets.ZITADEL_BASE }}
+  ZITADEL_BASE: ${{ secrets.ZITADEL_BASE }}   # e.g. https://your-tenant.zitadel.cloud
 
 jobs:
   inventory:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
-      - name: Checkout (full history, keep credentials)
+      - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Install jq + yq
+      - name: Tooling
         run: |
           set -e
           sudo apt-get update -y
           sudo apt-get install -y jq
           curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o yq
           sudo install -m 0755 yq /usr/local/bin/yq
-          yq --version
-          jq --version
+          jq --version; yq --version
 
-      - name: Get service token (client credentials)
+      - name: Env sanity
+        run: |
+          echo "ZITADEL_BASE=${ZITADEL_BASE:-<unset>}"
+          test -n "${{ secrets.ZITADEL_CLIENT_ID }}" && echo "CLIENT_ID set" || echo "CLIENT_ID MISSING"
+          test -n "${{ secrets.ZITADEL_CLIENT_SECRET }}" && echo "CLIENT_SECRET set" || echo "CLIENT_SECRET MISSING"
+
+      - name: Obtain service token (client credentials)
         id: token
         env:
           TOKEN_URL: ${{ env.ZITADEL_BASE }}/oauth/v2/token
           CLIENT_ID: ${{ secrets.ZITADEL_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.ZITADEL_CLIENT_SECRET }}
-          SCOPE: ${{ secrets.ZITADEL_SCOPE }} # e.g. "openid profile urn:zitadel:iam:org:project:id:zitadel:aud"
+          SCOPE: ${{ secrets.ZITADEL_SCOPE }} # e.g. openid profile urn:zitadel:iam:org:project:id:zitadel:aud
         run: |
           set -euo pipefail
-          if [[ -z "${TOKEN_URL:-}" || -z "${CLIENT_ID:-}" || -z "${CLIENT_SECRET:-}" ]]; then
-            echo "Missing ZITADEL_BASE / CLIENT_ID / CLIENT_SECRET; generating empty inventory." >&2
+          mkdir -p inventory/meta
+          if [ -z "${TOKEN_URL:-}" ] || [ -z "${CLIENT_ID:-}" ] || [ -z "${CLIENT_SECRET:-}" ]; then
             echo "token=" >> "$GITHUB_OUTPUT"
+            echo '{"users":[]}' > inventory/users.list.json
             exit 0
           fi
           TOK_JSON="$(curl -sS -X POST "$TOKEN_URL" \
@@ -53,79 +58,86 @@ jobs:
             --data-urlencode 'grant_type=client_credentials' \
             --data-urlencode "client_id=$CLIENT_ID" \
             --data-urlencode "client_secret=$CLIENT_SECRET" \
-            ${SCOPE:+--data-urlencode "scope=$SCOPE"})"
-          AT="$(jq -r '.access_token // empty' <<<"$TOK_JSON")"
+            ${SCOPE:+--data-urlencode "scope=$SCOPE"} || true)"
+          AT="$(jq -r '.access_token // empty' <<<"$TOK_JSON")" || AT=""
           if [ -z "$AT" ]; then
-            echo "Failed to obtain access token" >&2
-            echo "$TOK_JSON" >&2
+            echo "WARN: No access_token from ZITADEL. Writing empty users list and continuing."
+            echo "$TOK_JSON" > inventory/token_error.json
             echo "token=" >> "$GITHUB_OUTPUT"
+            echo '{"users":[]}' > inventory/users.list.json
             exit 0
           fi
           echo "token=$AT" >> "$GITHUB_OUTPUT"
 
-      - name: Search users (v2)
-        id: users
+      - name: Search users (POST /v2/users)
+        if: always()
         env:
           AT: ${{ steps.token.outputs.token }}
           API: ${{ env.ZITADEL_BASE }}/v2/users
         run: |
           set -euo pipefail
-          mkdir -p inventory
           if [ -z "${AT:-}" ] || [ -z "${API:-}" ]; then
             echo '{"users":[]}' > inventory/users.list.json
             exit 0
           fi
-          BODY='{"limit":200}'   # TODO: add paging if your tenant has >200 users
-          curl -sS -X POST "$API" \
-            -H "authorization: Bearer $AT" \
-            -H "content-type: application/json" \
-            -d "$BODY" > inventory/users.list.json
-          jq -e '.' inventory/users.list.json >/dev/null
+          BODY='{"limit":200}'
+          if ! curl -sS -X POST "$API" \
+              -H "authorization: Bearer $AT" \
+              -H "content-type: application/json" \
+              -d "$BODY" > inventory/users.list.json; then
+            echo 'WARN: user search failed; falling back to empty list'
+            echo '{"users":[]}' > inventory/users.list.json
+          fi
+          jq -e '.' inventory/users.list.json >/dev/null || echo 'WARN: users.list.json not valid JSON (continuing)'
 
-      - name: Fetch per-user metadata (lgpo_device_ids / lgpo_device_tags)
+      - name: Fetch per-user metadata (POST /v2/users/:id/metadata/search)
+        if: always()
         env:
           AT: ${{ steps.token.outputs.token }}
           BASE: ${{ env.ZITADEL_BASE }}
         run: |
           set -euo pipefail
-          mkdir -p inventory/meta
-          if [ -z "${AT:-}" ] || [ -z "${BASE:-}" ]; then
-            : # nothing to do; users.list.json is empty
-          else
-            # Adjust path to IDs if your /v2/users response shape differs
-            jq -r '..|objects|select(has("id"))|.id' inventory/users.list.json | sort -u > inventory/user_ids.txt || true
+          : > inventory/user_ids.txt
+          # Try common shapes: array of users or wrapped
+          jq -r '
+            if type=="object" and .users then .users[]? else .[]? end
+            | .id // empty' inventory/users.list.json 2>/dev/null \
+            | sort -u > inventory/user_ids.txt || true
+
+          if [ -s inventory/user_ids.txt ] && [ -n "${AT:-}" ] && [ -n "${BASE:-}" ]; then
             while read -r UID; do
               [ -z "$UID" ] && continue
               curl -sS -X POST "$BASE/v2/users/$UID/metadata/search" \
                 -H "authorization: Bearer $AT" \
                 -H "content-type: application/json" \
-                -d '{}' > "inventory/meta/$UID.json"
+                -d '{}' > "inventory/meta/$UID.json" || echo '{}' > "inventory/meta/$UID.json"
             done < inventory/user_ids.txt
           fi
 
-          # Build a joined JSON structure for rendering
+      - name: Join & render inventory/devices.yml
+        run: |
+          set -euo pipefail
+          # Build a minimal join; tolerate missing/empty files
           jq -n '
-            def kv_map(md):
-              (md.items // md.result // []) | map({ ( .key // .name // "" ): (.value // .data // "") }) | add;
+            def kv_map(md): (md.items // md.result // []) | map({ ( .key // .name // "" ): (.value // .data // "") }) | add;
             def norm_user(u): { id: (u.id // "unknown"), identity: (u.email // u.preferredEmail // u.userName // u.username // "unknown") };
-            (input | .) as $users
-            | [ $users[]? as $u
+
+            # Load users (either {users:[...]} or raw array)
+            def load_users:
+              (try (input | .users) catch (input)) // [];
+
+            (load_users) as $U
+            | [ $U[]? as $u
                 | ($u.id // empty) as $id
                 | ($id|tostring) as $uid
                 | (try (input | fromjson) catch {}) as $md
                 | (norm_user($u) + {meta: kv_map($md)})
-              ]' \
-            < <(jq -c '..|arrays? // empty | select(length>0) | .[]' inventory/users.list.json) \
-            $(for u in $(cat inventory/user_ids.txt 2>/dev/null || true); do printf "inventory/meta/%s.json " "$u"; done) \
-          > inventory/joined.json
+              ]
+          ' \
+          < <(cat inventory/users.list.json 2>/dev/null || echo '[]') \
+          $(for u in $(cat inventory/user_ids.txt 2>/dev/null || true); do printf "inventory/meta/%s.json " "$u"; done) \
+          > inventory/joined.json || echo '[]' > inventory/joined.json
 
-      - name: Render inventory/devices.yml
-        run: |
-          set -euo pipefail
-          mkdir -p inventory
-          if [ ! -s inventory/joined.json ]; then
-            echo '[]' > inventory/joined.json
-          fi
           jq '
             {
               apiVersion: "lgpo.io/v1",
@@ -153,10 +165,24 @@ jobs:
             }' inventory/joined.json \
           | yq -P > inventory/devices.yml
 
-          echo "Preview of inventory/devices.yml:"
+          echo "devices.yml generated:"
           sed -n '1,200p' inventory/devices.yml || true
 
-      - name: Commit & push directly to main (only if changed)
+      - name: Upload raw data (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventory-debug
+          path: |
+            inventory/users.list.json
+            inventory/user_ids.txt
+            inventory/meta/*.json
+            inventory/joined.json
+            inventory/devices.yml
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Commit & push to main (only if changed)
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -164,11 +190,15 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -euo pipefail
+          # Ensure we can fast-forward push
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main
+
           git add inventory/devices.yml inventory/users.list.json inventory/meta || true
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
           git commit -m "chore(inventory): sync from ZITADEL v2 [skip ci]"
-          # If your default branch is not 'main', change the ref below.
           git push origin HEAD:main
