@@ -168,6 +168,9 @@ if [ -f "${LOG_DIR}/audit.jsonl" ]; then
   sudo chmod 0640 "${LOG_DIR}/audit.jsonl"
 fi
 
+# final restart
+sudo systemctl restart lgpod 
+
 echo "Done ✅
 - Binary:     $BIN (root:lgpo, 0750)
 - Unit:       $SYSTEMD_UNIT (enabled)
@@ -179,4 +182,9 @@ echo "Done ✅
 
 Tip: add an admin to the 'lgpo' group to read status/logs:
   sudo usermod -aG lgpo <adminuser>
+Run: 
+  sudo systemctl status lgpod
+  sudo lgpod --sub tags
+  sudo lgpod --sub status
+  sudo cat /var/lib/lgpo/managed.json
 "
