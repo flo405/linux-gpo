@@ -34,6 +34,17 @@ type managedState struct {
 	Items   []managedItem `json:"items"`
 }
 
+type Runner struct {
+	cfg       *config.Config
+	log       *lglog.Logger
+	lastFacts map[string]string
+	lastTags  map[string]string
+}
+
+func New(cfg *config.Config, l *lglog.Logger) *Runner {
+	return &Runner{cfg: cfg, log: l}
+}
+
 func (r *Runner) managedPath() string {
 	// put it next to status.json
 	return filepath.Join(filepath.Dir(r.cfg.StatusFile), "managed.json")
@@ -51,17 +62,6 @@ func (r *Runner) saveManaged(items []managedItem) {
 	s := managedState{Version: 1, Items: items}
 	b, _ := json.MarshalIndent(s, "", "  ")
 	_ = os.WriteFile(r.managedPath(), b, 0o644)
-}
-
-type Runner struct {
-	cfg       *config.Config
-	log       *lglog.Logger
-	lastFacts map[string]string
-	lastTags  map[string]string
-}
-
-func New(cfg *config.Config, l *lglog.Logger) *Runner {
-	return &Runner{cfg: cfg, log: l}
 }
 
 func (r *Runner) Facts() map[string]string {
@@ -103,7 +103,6 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	if invErr != nil {
 		r.log.Warn("inventory", invErr.Error(), "device", deviceHash)
 	} else {
-		// optional info log if your logger supports Info; fallback to Warn with a friendly message
 		r.log.Warn("inventory", "synced", "device", deviceHash, "wrote", fmt.Sprintf("%d", wrote))
 	}
 
@@ -192,7 +191,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			desiredPaths[sp] = struct{}{}
 			desiredPaths[lp] = struct{}{}
 			desiredManaged = append(desiredManaged, managedItem{Path: sp}, managedItem{Path: lp})
-			dconfTouched = true // will be re-set later if only deletions happen; OK to keep true when anything changes
+			dconfTouched = true // OK if true when anything changes
 
 		case "ModprobePolicy":
 			var p mp.Policy
@@ -352,4 +351,46 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 	}
 	if err := os.Chmod(tmp, it.Mode); err != nil {
 		_ = os.Remove(tmp)
-		return false
+		return false, err
+	}
+	if err := os.Rename(tmp, it.Path); err != nil {
+		_ = os.Remove(tmp)
+		return false, err
+	}
+	return true, nil
+}
+
+// loadTags reads *.tag files and returns key->value.
+// It ignores blank lines and lines starting with '#', and takes the first value line.
+func loadTags(dir string) map[string]string {
+	m := map[string]string{}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return m
+	}
+	for _, e := range ents {
+		if e.IsDir() {
+		 continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".tag") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		val := ""
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			val = line
+			break // first non-comment line wins
+		}
+		k := strings.TrimSuffix(name, ".tag")
+		m[k] = val
+	}
+	return m
+}
