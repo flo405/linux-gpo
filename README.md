@@ -3,7 +3,9 @@
 Windows has **Group Policy Objects (GPOs)**: a centralized way to push policy across fleets.  
 Linux, by contrast, is gloriously diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder—there’s no single **Registry**, and many subsystems each speak their own language.
 
-**lgpo** is powered by a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo. **One unified policy language** in **YAML** is rendered into native Linux config systems.
+**lgpo** is powered by 
+- a **unified YAML-based policy language** that is rendered into native Linux config systems by
+- a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo.
 
 This early MVP version focuses three policy kinds:
 - **PolkitPolicy** → controls privileged actions (who can do what)  
