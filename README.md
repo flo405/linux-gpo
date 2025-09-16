@@ -83,7 +83,7 @@ export POLICY_REPO_URL=https://github.com/your-org/your-gitops-example-repo.git 
 curl -fsSL https://raw.githubusercontent.com/lgpo-org/lgpod/main/scripts/install-lgpo.sh | sudo bash
 ```
 ### Enrollment
-An SHA-256 hash of your public key such as ```7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90``` will be displayed at the end of the install process. Copy this hash and paste it into your forked GitOps example repo's inventory/devices.yml file. 
+Your public key's SHA-256 hash such as ```7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90``` will be displayed at the end of the install process. Copy this hash and paste it into your forked GitOps example repo's devices.yml file in the "inventory" folder to enroll the device. 
 
 ### Dry-run, then apply
 
