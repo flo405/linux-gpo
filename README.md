@@ -187,16 +187,22 @@ spec:
 ## Facts & tags (targeting)
 
 **facts** (auto-discovered):  
-`hostname`, `os.id`, `os.version`, `has_gnome` (true/false), …
+`hostname`, `os.id`, `os.version`, `has_gnome`, …
 
 **tags** (you control):  
-Plain text files in `/etc/lgpo/tags.d/`. The filename (without `.tag`) is the key; the file content is the value.
+keys such as `group`, `ou`, `team` that contain values defined in your GitOps repo 
 
-Examples:
+Example from the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example/blob/main/inventory/devices.yml):
 
-```bash
-echo laptops | sudo tee /etc/lgpo/tags.d/group.tag
-echo eu      | sudo tee /etc/lgpo/tags.d/geo.tag
+```yaml
+apiVersion: lgpo.io/v1
+kind: DeviceInventory
+items:
+  - device_pub_sha256: "80223685a0606823f104caee502edacd202d7e81ea6f948cd0bff8fb272baafc"
+    identity: "alice@example.orf"
+    tags:
+      group: "developers"
+      ou: "it"
 ```
 
 Use in a policy selector:
@@ -206,7 +212,7 @@ selector:
   facts:
     has_gnome: "true"
   tags:
-    group: ["laptops", "workstations"]
+    group: ["developers", "devops"]
 ```
 
 ---
