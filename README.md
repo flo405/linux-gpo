@@ -70,8 +70,7 @@ Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example)
 
 ## Quick start (PoC)
 ### Requirements
-Fork the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) that has policies and an inventory file
-Set environmet variables
+Fork the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) that includes pol example policy and inventory files. Set your repo as environment variable to prepare the install process.
 ```bash
 export POLICY_REPO_URL=https://github.com/your-org/your-lgpo-gitops-repo/
 ```
