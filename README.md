@@ -44,7 +44,7 @@ This early MVP version focuses three policy kinds:
 
 **GitOps flow**
 
-1. **Policies live in Git** (e.g. `https://github.com/lgpo-org/lgpod`, under `policies/`).
+1. **Policies and inventory lives in Git** (e.g. `https://github.com/lgpo-org/lgpo-gitops-example`).
 2. **Agent (`lgpod`) runs on endpoints** on a timer with jitter.
 3. Each run:
    - **Shallow-fetches** the branch tip (no history).
