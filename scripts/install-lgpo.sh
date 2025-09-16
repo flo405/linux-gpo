@@ -4,7 +4,7 @@
 # ============================================================
 # Tunables (override via env)
 # ============================================================
-SRC_REPO_URL="${SRC_REPO_URL:-https://github.com/flo405/linux-gpo.git}"
+SRC_REPO_URL="${SRC_REPO_URL:-https://github.com/lgpo-org/lgpod.git}"
 SRC_BRANCH="${SRC_BRANCH:-main}"
 POLICY_REPO_URL="${POLICY_REPO_URL:-$SRC_REPO_URL}"
 POLICY_BRANCH="${POLICY_BRANCH:-$SRC_BRANCH}"
