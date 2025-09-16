@@ -14,16 +14,16 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/flo405/linux-gpo/pkg/config"
-	dc "github.com/flo405/linux-gpo/pkg/dconf"
-	"github.com/flo405/linux-gpo/pkg/facts"
-	"github.com/flo405/linux-gpo/pkg/git"
-	"github.com/flo405/linux-gpo/pkg/inventory"
-	lglog "github.com/flo405/linux-gpo/pkg/log"
-	mp "github.com/flo405/linux-gpo/pkg/modprobe"
-	pk "github.com/flo405/linux-gpo/pkg/polkit"
-	"github.com/flo405/linux-gpo/pkg/selector"
-	"github.com/flo405/linux-gpo/pkg/status"
+	"github.com/lgpo-org/lgpod/pkg/config"
+	dc "github.com/lgpo-org/lgpod/pkg/dconf"
+	"github.com/lgpo-org/lgpod/pkg/facts"
+	"github.com/lgpo-org/lgpod/pkg/git"
+	"github.com/lgpo-org/lgpod/pkg/inventory"
+	lglog "github.com/lgpo-org/lgpod/pkg/log"
+	mp "github.com/lgpo-org/lgpod/pkg/modprobe"
+	pk "github.com/lgpo-org/lgpod/pkg/polkit"
+	"github.com/lgpo-org/lgpod/pkg/selector"
+	"github.com/lgpo-org/lgpod/pkg/status"
 )
 
 type managedItem struct {
