@@ -1,6 +1,6 @@
 # lgpo — Linux Group Policy Objects, reimagined with GitOps
 
-Group Policy Objects (GPOs) arrived with the Windows 2000/Active Directory era in February 2000. While AD and GPOs are considered insecure by default and design, admins still rely on them for configuration management and compliance enforcement across fleets of business devices. In contrast to Windows, Linux is diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. 
+Group Policy Objects (GPOs) arrived with Active Directory in February 2000. Today, AD and GPOs are considered insecure by default and design since compromised controllers, lax permissions, or poorly reviewed changes can broadcast malware or enable lateral movement across the entire domain. Admins still rely on them for configuration management. In contrast to Windows, Linux is diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. lpod is built to carry AD’s standardization ethos into a cross-platform, cloud-first world, minimizing the attack surface and working alongside modern IdPs and device lifecycles. 
 
 **lgpo** is powered by 
 - a **unified YAML-based policy language** that is rendered into native Linux config systems by
@@ -8,11 +8,11 @@ Group Policy Objects (GPOs) arrived with the Windows 2000/Active Directory era i
 
 Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and device mangement.
 
-## GitOps configuration management for Linux workstations
+## Why GitOps
+- 🏛️  Many organizations already trust in GitOps to secure their Kubernetes clusters. Use this **well established process** to manage Linux workstations.
+- 👀  It's easy to enforce the **four-eyes principle** and status checks (CI, linters, YAML/schema validators, policy render tests) before merge.  
 - 🔐 **Change control:** every edit is a PR with history, reviews, and a merge commit you can audit.  
-- 👀 **Four-eyes principle & quality gates:** require approvals via CODEOWNERS, enforce status checks (CI, linters, YAML/schema validators, policy render tests) before merge.  
 - 🔁 **Reproducibility:** endpoints apply a specific commit; you can correlate any host’s state with the exact Git SHA.  
-- ⚡️🛡️ **Safety & speed:** shallow fetches keep bandwidth tiny; rendering is side-effect-free until the final atomic write.  
 - ⏪ **Easy rollback:** `git revert` (or restore a previous commit) → agents reset to that state on the next interval.  
 - 🧱 **Smaller attack surface:** agents pull over HTTPS directly from Git; fewer privileged services and credentials to defend.
 ---
