@@ -1,16 +1,10 @@
 # lgpo — Linux Group Policy Objects, reimagined with GitOps
 
-Windows has **Group Policy Objects (GPOs)**: a centralized way to push policy across fleets.  
-Linux, by contrast, is gloriously diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder—there’s no single **Registry**, and many subsystems each speak their own language.
+Group Policy Objects (GPOs) arrived with the Windows 2000/Active Directory era in February 2000. While AD and GPOs are considered insecure by default and design, admins still rely on them for configuration management and compliance enforcement across fleets of business devices. In contrast to Windows, Linux is diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. 
 
 **lgpo** is powered by 
 - a **unified YAML-based policy language** that is rendered into native Linux config systems by
 - a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo.
-
-This early MVP version focuses three policy kinds:
-- **PolkitPolicy** → controls privileged actions (who can do what)  
-- **DconfPolicy** → GNOME settings + locks (opinionated desktop security)  
-- **ModprobePolicy** → kernel module allow/deny (e.g., block USB mass storage)
 
 Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and device mangement.
 
@@ -104,9 +98,12 @@ tail -n 3 /var/log/lgpo/audit.jsonl
 
 ## Policies: examples
 
-Drop these into your Git repo under `policies/` (any filename ending with `.yml`).
+This early MVP version includes three kinds of policies:
+- **ModprobePolicy** → kernel module allow/deny (e.g., block USB mass storage)
+- **PolkitPolicy** → controls privileged actions (who can do what)  
+- **DconfPolicy** → GNOME settings + locks (opinionated desktop security)  
 
-### Block USB storage (Linux kernel)
+### Block USB storage (ModprobePolicy for most Linux distributions)
 
 ```yaml
 apiVersion: lgpo.io/v1
@@ -125,7 +122,7 @@ spec:
 
 ---
 
-### Snap admin only (Ubuntu)
+### Snap admin only (PolkitPolicy for Ubuntu)
 
 ```yaml
 apiVersion: lgpo.io/v1
@@ -148,7 +145,7 @@ spec:
 
 ---
 
-### GNOME lockscreen baseline
+### Lockscreen baseline (DconfPolicy for GNOME)
 
 ```yaml
 apiVersion: lgpo.io/v1
