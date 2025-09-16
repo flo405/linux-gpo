@@ -4,10 +4,10 @@
 # ============================================================
 # Tunables (override via env)
 # ============================================================
-SRC_REPO_URL="${SRC_REPO_URL:-https://github.com/lgpo-org/lgpo-gitops-example.git}"
+SRC_REPO_URL="${SRC_REPO_URL:-https://github.com/lgpo-org/lgpod.git}"
 SRC_BRANCH="${SRC_BRANCH:-main}"
-POLICY_REPO_URL="${POLICY_REPO_URL:-$SRC_REPO_URL}"
-POLICY_BRANCH="${POLICY_BRANCH:-$SRC_BRANCH}"
+POLICY_REPO_URL="${POLICY_REPO_URL:-https://github.com/lgpo-org/lgpo-gitops-example.git}"
+POLICY_BRANCH="${POLICY_BRANCH:-main}"
 
 # Paths
 SRC_DIR="${SRC_DIR:-/opt/lgpo/src}"
