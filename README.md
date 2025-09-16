@@ -44,7 +44,7 @@ This early MVP version focuses three policy kinds:
 
 **GitOps flow**
 
-1. **Policies live in Git** (e.g. `https://github.com/flo405/linux-gpo`, under `policies/`).
+1. **Policies live in Git** (e.g. `https://github.com/lgpo-org/lgpod`, under `policies/`).
 2. **Agent (`lgpod`) runs on endpoints** on a timer with jitter.
 3. Each run:
    - **Shallow-fetches** the branch tip (no history).
@@ -71,7 +71,7 @@ This early MVP version focuses three policy kinds:
 ### Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/flo405/linux-gpo/main/scripts/install-lgpo.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/lgpo-org/lgpod/main/scripts/install-lgpo.sh | sudo bash
 ```
 
 This installs:
@@ -282,7 +282,7 @@ If a device stops matching a policy (e.g., you change its `group.tag` from `lapt
 `/etc/lgpo/agent.yaml`:
 
 ```yaml
-repo: https://github.com/flo405/linux-gpo.git   # Git URL with policies
+repo: https://github.com/lgpo-org/lgpod.git   # Git URL with policies
 branch: main                                    # branch name
 policiesPath: policies                          # path in repo
 tagsDir: /etc/lgpo/tags.d                       # local tags folder
