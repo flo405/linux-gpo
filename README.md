@@ -12,6 +12,8 @@ This early MVP version focuses three policy kinds:
 - **DconfPolicy** → GNOME settings + locks (opinionated desktop security)  
 - **ModprobePolicy** → kernel module allow/deny (e.g., block USB mass storage)
 
+Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and device mangement.
+
 ## GitOps configuration management for Linux workstations
 - 🔐 **Change control:** every edit is a PR with history, reviews, and a merge commit you can audit.  
 - 👀 **Four-eyes principle & quality gates:** require approvals via CODEOWNERS, enforce status checks (CI, linters, YAML/schema validators, policy render tests) before merge.  
@@ -67,26 +69,19 @@ This early MVP version focuses three policy kinds:
 ---
 
 ## Quick start (PoC)
-
+### Requirements
+Fork the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) that has policies and an inventory file
+Set environmet variables
+```bash
+export POLICY_REPO_URL=https://github.com/your-org/your-lgpo-gitops-repo/
+```
 ### Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lgpo-org/lgpod/main/scripts/install-lgpo.sh | sudo bash
 ```
-
-This installs:
-- Binary: `/usr/local/bin/lgpod`
-- Unit:   `/etc/systemd/system/lgpod.service` (enabled)
-- Config: `/etc/lgpo/agent.yaml`
-- Cache:  `/var/lib/lgpo/repo`
-- State:  `/var/lib/lgpo/status.json`
-- Audit:  `/var/log/lgpo/audit.jsonl`
-
-### Put this device in the **laptops** group (tag)
-
-```bash
-echo laptops | sudo tee /etc/lgpo/tags.d/group.tag
-```
+### Enrollment
+An SHA-256 hash of your public key such as ```7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90``` will be displayed at the end of the install process. Copy this hash and paste it into your forked GitOps example repo's inventory/devices.yml file. 
 
 ### Dry-run, then apply
 
