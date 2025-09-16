@@ -1,4 +1,4 @@
-module github.com/flo405/linux-gpo
+module github.com/lgpo-org/lgpod
 
 go 1.22
 
