@@ -40,6 +40,20 @@ Your device's public key starting with `ssh-ed25519 AAAAC3NzaC1lZD...` and your 
 1. Copy the public key and paste it as a new deploy key (in your GitOps repo's settings, click "deploy keys", grant READ-ONLY access, you can use the hash as name)
 2. Copy the hash and paste it into your GitOps repo's devices.yml file in the "inventory" folder to enroll the device.
 
+Example devices.yml from the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example/blob/main/inventory/devices.yml):
+
+```yaml
+apiVersion: lgpo.io/v1
+kind: DeviceInventory
+items:
+  - device_pub_sha256: "7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90"
+    identity: "alice@example.com"
+    tags:
+      group: "laptops"
+      ou: "finance"
+      site: "vienna"
+```
+
 ### Dry-run, then apply
 
 ```bash
