@@ -152,21 +152,6 @@ spec:
 **tags** (you control):  
 keys such as `group`, `ou`, `team` that contain values defined in your GitOps repo 
 
-Example from the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example/blob/main/inventory/devices.yml):
-
-```yaml
-apiVersion: lgpo.io/v1
-kind: DeviceInventory
-items:
-  - device_pub_sha256: "80223685a0606823f104caee502edacd202d7e81ea6f948cd0bff8fb272baafc"
-    identity: "alice@example.com"
-    tags:
-      group: "controlling"
-      ou: "finance"
-      site: "vienna"
-      device: "laptop"
-```
-
 Use in a policy selector:
 
 ```yaml
