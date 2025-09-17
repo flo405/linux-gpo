@@ -20,7 +20,7 @@ Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example)
 
 ---
 
-## Quick start (PoC)
+## Quick start
 
 ### Requirements
 
