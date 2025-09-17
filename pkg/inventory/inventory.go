@@ -144,7 +144,7 @@ func cleanManagedTagsExcept(tagsDir string, keep map[string]struct{}) (int, erro
 // SyncInventoryTags computes the device hash, looks it up in inventory/devices.yml,
 // and writes tags to tagsDir. Returns (deviceHash, numberOfFilesWritten).
 func SyncInventoryTags(cacheDir, tagsDir, deviceKeyPath string) (string, int, error) {
-	hash, _, err := ComputeDeviceHashFromPrivateKey(deviceKeyPath)
+	hash, _, err := ComputeDeviceHashPreferPub(deviceKeyPath)
 	if err != nil {
 		return "", 0, err
 	}
