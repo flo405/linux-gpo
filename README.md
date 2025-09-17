@@ -68,16 +68,17 @@ Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example)
 
 ### Requirements
 
-Fork the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) that includes example policy and inventory files. Set your repo as environment variable to prepare the install process.
+Fork the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) that includes example policy and inventory files. Change the repo visibility to private in Settings / Danger Zone.  
 
-```bash
-export POLICY_REPO_URL=https://github.com/your-org/your-gitops-example-repo.git (please change url)
-```
 ### Install
 
+Copy the command below, change `POLICY_REPO_URL="git@github.com:your-org/your-lgpo-gitops-repo.git"` to your new private repo and run the command.
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lgpo-org/lgpod/main/scripts/install-lgpo.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/lgpo-org/lgpod/main/scripts/install-lgpo.sh \
+| sudo env POLICY_REPO_URL="git@github.com:your-org/your-lgpo-gitops-repo.git" POLICY_BRANCH="main" bash
 ```
+
 ### Enrollment
 Your public key's SHA-256 hash such as ```7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90``` will be displayed at the end of the install process. Copy this hash and paste it into your forked GitOps example repo's devices.yml file in the "inventory" folder to enroll the device. 
 
