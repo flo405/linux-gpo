@@ -2,7 +2,7 @@
 
 Windows Group Policy Objects (GPOs) arrived with Active Directory in February 2000. 25 years later, Linux gets a desktop configuration management system that enables organizations to programmatically enforce compliance across a fleet of Linux workstations. 
 
-In contrast to Windows, Linux is gloriously diverse: different distros (Debian, Fedora, etc.) different desktops (GNOME, KDE, etc.), and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules, etc.). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. 
+In contrast to Windows, Linux is gloriously diverse: different distros (Debian, Fedora, etc.) different desktops (GNOME, KDE, etc.), and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules, etc.). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. Many organizations currently use server configuration tools like Ansible or even bash scripts to manage Linux laptops.
 
 **lgpo** is powered by 
 - a **simple unified YAML-based policy language** that is rendered into different native Linux config systems by
