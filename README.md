@@ -275,7 +275,7 @@ Writes are **atomic** (tmp + rename). Paths outside the allowlist are ignored.
 
 ## Drift cleanup
 
-If a device stops matching a policy (e.g., you change its `group.tag` from `laptops` to `desktops`), the next run removes previously managed files that are no longer desired. The audit log includes a `removed` count, and `dconf update` / `update-initramfs -u` are triggered when needed.
+If a device stops matching a policy (e.g., you change its `group` tag from `laptops` to `desktops`), the next run removes previously managed files that are no longer desired. The audit log includes a `removed` count, and `dconf update` / `update-initramfs -u` are triggered when needed.
 
 ---
 
