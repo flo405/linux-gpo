@@ -33,40 +33,62 @@ type DeviceEntry struct {
 
 // ComputeDeviceHashFromPrivateKey loads a PKCS#8 Ed25519 private key PEM and returns
 // (hex SHA-256 of public key PEM, public key PEM bytes).
-func ComputeDeviceHashFromPrivateKey(privPath string) (string, []byte, error) {
-	keyPEM, err := os.ReadFile(privPath)
+func ComputeDeviceHashFromPrivateKey(path string) (string, []byte, error) {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", nil, fmt.Errorf("read private key: %w", err)
 	}
-	block, _ := pem.Decode(keyPEM)
+
+	// Try OpenSSH private key first (-----BEGIN OPENSSH PRIVATE KEY-----)
+	if strings.Contains(string(b), "BEGIN OPENSSH PRIVATE KEY") {
+		privAny, err := ssh.ParseRawPrivateKey(b)
+		if err != nil {
+			return "", nil, fmt.Errorf("parse OpenSSH private key: %w", err)
+		}
+		// Expect Ed25519
+		switch k := privAny.(type) {
+		case ed25519.PrivateKey:
+			pub := k.Public().(ed25519.PublicKey)
+			der, err := x509.MarshalPKIXPublicKey(pub)
+			if err != nil { return "", nil, fmt.Errorf("marshal public key: %w", err) }
+			pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+			sum := sha256.Sum256(pubPEM)
+			return strings.ToLower(hex.EncodeToString(sum[:])), pubPEM, nil
+		case *ed25519.PrivateKey:
+			pub := (*k).Public().(ed25519.PublicKey)
+			der, err := x509.MarshalPKIXPublicKey(pub)
+			if err != nil { return "", nil, fmt.Errorf("marshal public key: %w", err) }
+			pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+			sum := sha256.Sum256(pubPEM)
+			return strings.ToLower(hex.EncodeToString(sum[:])), pubPEM, nil
+		default:
+			return "", nil, errors.New("unsupported private key type (expected Ed25519)")
+		}
+	}
+
+	// Fallback: legacy PKCS#8 (-----BEGIN PRIVATE KEY-----)
+	block, _ := pem.Decode(b)
 	if block == nil || !strings.Contains(block.Type, "PRIVATE KEY") {
 		return "", nil, errors.New("invalid PEM: no PRIVATE KEY block found")
 	}
-
 	privAny, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return "", nil, fmt.Errorf("parse PKCS#8 private key: %w", err)
 	}
 	priv, ok := privAny.(ed25519.PrivateKey)
 	if !ok || len(priv) == 0 {
-		return "", nil, errors.New("not an Ed25519 private key")
+		return "", nil, errors.New("could not derive Ed25519 private key")
 	}
-
-	pubAny := priv.Public()
-	pub, ok := pubAny.(ed25519.PublicKey)
-	if !ok || len(pub) == 0 {
-		return "", nil, errors.New("could not derive Ed25519 public key")
-	}
-
+	pub := priv.Public().(ed25519.PublicKey)
 	der, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {
 		return "", nil, fmt.Errorf("marshal public key: %w", err)
 	}
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
-
 	sum := sha256.Sum256(pubPEM)
 	return strings.ToLower(hex.EncodeToString(sum[:])), pubPEM, nil
 }
+
 
 // loadInventory reads inventory/devices.yml from cacheDir.
 func loadInventory(cacheDir string) (*DeviceInventory, error) {
