@@ -8,7 +8,36 @@ In contrast to Windows, Linux is diverse: different distros (Debian, Fedora, etc
 - a **unified YAML-based policy language** that is rendered into different native Linux config systems by
 - a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo.
 
-Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and inventory mangement.
+lgopd simply matches tags of your polcy objects, such as this example policy that blocks usb storage devices on `laptops` and `kiosk` devices 
+
+```yaml
+apiVersion: lgpo.io/v1
+kind: ModprobePolicy
+metadata: { name: block-removable-storage }
+selector:
+  tags:
+    group: ["laptops", "kiosk"]
+spec:
+  blacklist: ["usb_storage", "uas", "firewire_ohci", "sbp2"]
+  installFalse: true       # install <mod> /bin/false → hard-block
+  updateInitramfs: true    # rebuild so block applies early
+```
+
+with tags of inventory objects, such as this example that defines a device in the `laptops` group
+
+```yaml
+apiVersion: lgpo.io/v1
+kind: DeviceInventory
+items:
+  - device_pub_sha256: "7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90"
+    identity: "alice@example.com"
+    tags:
+      group: "laptops"
+      ou: "finance"
+      site: "vienna"
+```
+
+Please visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and inventory mangement.
 
 ## Why GitOps
 - 🏛️  Many organizations already trust in GitOps to secure their crown-jewels such as k8s clusters. Use this **well established process** to manage Linux workstations too.
