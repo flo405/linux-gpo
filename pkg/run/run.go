@@ -89,7 +89,6 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	r.lastFacts = facts.Discover()
 
 	// 2) Ensure the repo cache is up-to-date (policies + inventory)
-	\
         commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
         if err != nil {
             // Enrollment-friendly guidance for private repos or auth/permission issues
