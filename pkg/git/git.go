@@ -92,7 +92,7 @@ func httpsToSSH(u string) string {
 }
 
 func sshEnv() []string {
-	// no pinning requested; accept-new to avoid prompts on first contact
+	// No pinning for now (accept-new), BatchMode avoids prompts
 	return []string{`GIT_SSH_COMMAND=ssh -i ` + deviceKeyPath + ` -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new`}
 }
 
