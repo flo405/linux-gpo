@@ -17,50 +17,6 @@ Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example)
 - 🔁 **Reproducibility:** endpoints apply a specific commit; you can correlate any host’s state with the exact Git SHA.  
 - ⏪ **Easy rollback:** `git revert` (or restore a previous commit) → agents reset to that state on the next interval.  
 - 🧱 **Smaller attack surface:** agents pull over HTTPS directly from Git; fewer privileged services and credentials to defend.
----
-
-## Table of contents
-
-- [Architecture](#architecture)
-- [Quick start (PoC)](#quick-start-poc)
-- [Policies: examples](#policies-examples)
-  - [Block USB storage (Linux kernel)](#block-usb-storage-linux-kernel)
-  - [Snap admin only (Ubuntu)](#snap-admin-only-ubuntu)
-  - [GNOME lockscreen baseline](#gnome-lockscreen-baseline)
-- [Facts & tags (targeting)](#facts--tags-targeting)
-- [Interval & jitter (scheduling)](#interval--jitter-scheduling)
-- [CLI you’ll use a lot](#cli-youll-use-a-lot)
-- [What gets written on disk](#what-gets-written-on-disk)
-- [Drift cleanup](#drift-cleanup)
-- [Config file](#config-file)
-- [How Git sync works](#how-git-sync-works)
-- [Roadmap (post-MVP)](#roadmap-postmvp)
-
----
-
-## Architecture
-
-**GitOps flow**
-
-1. **Policies and inventory lives in Git** (e.g. `https://github.com/lgpo-org/lgpo-gitops-example`).
-2. **Agent (`lgpod`) runs on endpoints** on a timer with jitter.
-3. Each run:
-   - **Shallow-fetches** the branch tip (no history).
-   - Discovers **facts** and reads **tags**, evaluates **selectors**.
-   - **Renders** matching policies → system files (polkit/dconf/modprobe).
-   - **Atomic writes** + **post-steps** (`dconf update`, `update-initramfs -u`).
-   - Updates **status** + **audit**; saves a **managed manifest** for cleanup.
-
-**Writable paths (allowlist)**
-
-- `/etc/polkit-1/rules.d/60-lgpo-*.rules`
-- `/etc/dconf/db/local.d/60-lgpo-*` and `/etc/dconf/db/local.d/locks/60-lgpo-*`
-- `/etc/modprobe.d/60-lgpo-*.conf`
-
-**Drift detection & cleanup**
-
-- The agent tracks previously applied files in `/var/lib/lgpo/managed.json`.  
-  On a later run, if a file is **no longer desired** (e.g., device left the `laptops` group), lgpo **deletes** it and triggers the appropriate post-step.
 
 ---
 
@@ -80,7 +36,9 @@ curl -fsSL https://raw.githubusercontent.com/lgpo-org/lgpod/main/scripts/install
 ```
 
 ### Enrollment
-Your public key's SHA-256 hash such as ```7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90``` will be displayed at the end of the install process. Copy this hash and paste it into your forked GitOps example repo's devices.yml file in the "inventory" folder to enroll the device. 
+Your device's public key starting with `ssh-ed25519 AAAAC3NzaC1lZD...` and your device id, a hash such as ```7a93be12cd34ef56ab78cd90ef12ab34cd56ef78ab90cd12ef34ab56cd78ef90``` will be displayed at the end of the install process.
+1. Copy the public key and paste it as a new deploy key (in your GitOps repo's settings, click "deploy keys", grant READ-ONLY access, you can use the hash as name)
+2. Copy the hash and paste it into your GitOps repo's devices.yml file in the "inventory" folder to enroll the device.
 
 ### Dry-run, then apply
 
@@ -92,6 +50,8 @@ sudo lgpod --sub run --once             # enforce now (or wait for the service i
 Verify:
 
 ```bash
+sudo lgpod -sub tags
+sudo lgpod -sub facts
 systemctl status lgpod --no-pager
 cat /var/lib/lgpo/status.json
 tail -n 3 /var/log/lgpo/audit.jsonl
