@@ -78,15 +78,15 @@ tail -n 3 /var/log/lgpo/audit.jsonl
 `/etc/lgpo/agent.yaml`:
 
 ```yaml
-repo: https://github.com/lgpo-org/lgpod.git   # Git URL with policies
-branch: main                                    # branch name
-policiesPath: policies                          # path in repo
-tagsDir: /etc/lgpo/tags.d                       # local tags folder
-interval: 5m                                   # how often to sync/apply
-jitter: 1m                                      # small randomness to avoid herd behavior
-auditLog: /var/log/lgpo/audit.jsonl
-statusFile: /var/lib/lgpo/status.json
-cacheDir: /var/lib/lgpo/repo
+repo: git@github.com:your-org/your-lgpo-gitops-repo.git   # policy and inventory repo
+branch: main                                              # branch name
+policiesPath: policies                                    # policy path in repo
+interval: 5m                                              # how often to sync/apply
+jitter: 1m                                                # small randomness to avoid herd behavior
+auditLog: /var/log/lgpo/audit.jsonl                       # audit logs path
+statusFile: /var/lib/lgpo/status.json                     # status file path
+cacheDir: /var/lib/lgpo/repo                              # cached repo path
+tagsDir: /etc/lgpo/tags.d                                 # local tags folder
 ```
 
 ---
