@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
+# scripts/install-lgpo.sh
+# Installs lgpod, sets up config, generates a single device keypair,
+# and prints both the device ID (hash derived from the PRIVATE key) and the SSH public key.
+# Supports private GitHub policy repos via SSH deploy keys (read-only).
+
 # set -euo pipefail
 
 # ============================================================
-# Tunables (override via env)
+# Root check
+# ============================================================
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+  echo "Please run as root (use sudo)."
+  exit 1
+fi
+
+# ============================================================
+# Tunables (override via env; use `sudo env VAR=... bash` when piping)
 # ============================================================
 SRC_REPO_URL="${SRC_REPO_URL:-https://github.com/lgpo-org/lgpod.git}"
 SRC_BRANCH="${SRC_BRANCH:-main}"
+
+# Your policy repo (public or PRIVATE). For private, prefer SSH form: git@github.com:ORG/REPO.git
 POLICY_REPO_URL="${POLICY_REPO_URL:-https://github.com/lgpo-org/lgpo-gitops-example.git}"
 POLICY_BRANCH="${POLICY_BRANCH:-main}"
 
@@ -24,16 +39,9 @@ DEVICE_PUB="${DEVICE_PUB:-$DEVICE_DIR/device.key.pub}"
 DEVICE_HASH_FILE="${DEVICE_HASH_FILE:-$DEVICE_DIR/device.pub.sha256}"
 
 # Behavior flags
-LGPO_NONINTERACTIVE="${LGPO_NONINTERACTIVE:-0}"   # set 1 to skip prompts
-LGPO_REGEN_KEY="${LGPO_REGEN_KEY:-ask}"           # ask|yes|no (yes=force regen, no=keep existing)
-
-# ============================================================
-# Root check
-# ============================================================
-if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-  echo "Please run as root (use sudo)."
-  exit 1
-fi
+LGPO_NONINTERACTIVE="${LGPO_NONINTERACTIVE:-0}"   # reserved
+LGPO_REGEN_KEY="${LGPO_REGEN_KEY:-no}"            # yes = force regenerate key even if present
+LGPO_FORCE_CONFIG="${LGPO_FORCE_CONFIG:-no}"      # yes = overwrite /etc/lgpo/agent.yaml even if present
 
 # ============================================================
 # 1) Prereqs
@@ -50,37 +58,32 @@ else
 fi
 
 # ============================================================
-# 2) Fetch source & build
+# 2) Fetch sources & build lgpod
 # ============================================================
-echo "[2/8] Cloning source from ${SRC_REPO_URL} (branch ${SRC_BRANCH})..."
-rm -rf "$SRC_DIR"
-install -d -m 0750 "$SRC_DIR"
-chown root:root "$SRC_DIR"
-git clone --depth 1 --branch "$SRC_BRANCH" "$SRC_REPO_URL" "$SRC_DIR"
-cd "$SRC_DIR"
+echo "[2/8] Fetching lgpod sources..."
+install -d -m 0755 "$SRC_DIR"
+if [ -d "$SRC_DIR/.git" ]; then
+  git -C "$SRC_DIR" remote set-url origin "$SRC_REPO_URL" || true
+  git -C "$SRC_DIR" fetch --depth 1 origin "$SRC_BRANCH"
+  git -C "$SRC_DIR" reset --hard "origin/${SRC_BRANCH}"
+else
+  git clone --depth 1 --branch "$SRC_BRANCH" "$SRC_REPO_URL" "$SRC_DIR"
+fi
 
-echo "[3/8] Building lgpod..."
-export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
-export GOSUMDB="${GOSUMDB:-sum.golang.org}"
-go env -w GOPROXY="$GOPROXY" >/dev/null 2>&1 || true
-go env -w GOSUMDB="$GOSUMDB" >/dev/null 2>&1 || true
-
-# Make modules happy, even on first install
-GO111MODULE=on go mod tidy
-GO111MODULE=on go mod download
-
-go build -o lgpod ./cmd/lgpod
-# Least privilege: binary 0750 (root + group can exec). Use group 'sudo' if present, else root.
-BIN_GROUP="root"
-getent group sudo >/dev/null 2>&1 && BIN_GROUP="sudo"
-install -o root -g "$BIN_GROUP" -m 0750 ./lgpod "$BIN"
+echo "[3/8] Building and installing lgpod..."
+install -d -m 0755 "$(dirname "$BIN")"
+# Build with size optimizations, but keep it simple for portability
+(cd "$SRC_DIR/cmd/lgpod" && go build -trimpath -ldflags="-s -w" -o "$BIN")
+chmod 0755 "$BIN"
+chown root:root "$BIN"
+"$BIN" --version || true
 
 # ============================================================
 # 3) Systemd unit
 # ============================================================
 echo "[4/8] Installing systemd unit..."
-if [ -f "packaging/systemd/lgpod.service" ]; then
-  install -m 0644 packaging/systemd/lgpod.service "$SYSTEMD_UNIT"
+if [ -f "$SRC_DIR/packaging/systemd/lgpod.service" ]; then
+  install -m 0644 "$SRC_DIR/packaging/systemd/lgpod.service" "$SYSTEMD_UNIT"
 else
   tee "$SYSTEMD_UNIT" >/dev/null <<'EOF'
 [Unit]
@@ -120,15 +123,12 @@ fi
 systemctl daemon-reload
 
 # ============================================================
-# 4) Config & directories (least privilege)
+# 4) Config (agent.yaml)
 # ============================================================
-echo "[5/8] Writing config & creating directories..."
+echo "[5/8] Writing config..."
 install -d -m 0750 "$(dirname "$CONFIG")" "$TAGS_DIR" "$STATE_DIR" "$LOG_DIR" "$CACHE_DIR"
-chown -R root:root /etc/lgpo "$STATE_DIR" "$LOG_DIR" "$CACHE_DIR"
-chmod 0750 /etc/lgpo "$TAGS_DIR" "$STATE_DIR" "$CACHE_DIR"
-chmod 0750 "$LOG_DIR" || true
-
-if [ ! -f "$CONFIG" ]; then
+if [ ! -f "$CONFIG" ] || [ "$LGPO_FORCE_CONFIG" = "yes" ]; then
+  [ -f "$CONFIG" ] && echo "LGPO_FORCE_CONFIG=yes → overwriting $CONFIG"
   tee "$CONFIG" >/dev/null <<EOF
 repo: ${POLICY_REPO_URL}
 branch: ${POLICY_BRANCH}
@@ -143,8 +143,48 @@ EOF
   chmod 0640 "$CONFIG"
 fi
 
-# Prefetch policies (not required, but nice)
+# ============================================================
+# 5) Device identity: single keypair for BOTH GitHub auth & device ID
+#    Device ID is derived from the *PRIVATE* key (public half), same rule as before.
+# ============================================================
+echo "[6/8] Ensuring device key exists at $DEVICE_KEY ..."
+# Stop service during key operations to avoid races
+systemctl stop lgpod 2>/dev/null || true
+
+generate_key() {
+  umask 0177
+  install -d -m 0750 "$DEVICE_DIR"
+  # Generate OpenSSH Ed25519 keypair (no passphrase)
+  ssh-keygen -t ed25519 -a 64 -N "" \
+    -C "lgpo-$(hostname)-$(cat /etc/machine-id 2>/dev/null || uuidgen)" \
+    -f "$DEVICE_KEY"
+  chmod 0600 "$DEVICE_KEY" && chown root:root "$DEVICE_KEY"
+  chmod 0640 "$DEVICE_PUB" && chown root:root "$DEVICE_PUB"
+}
+
+if [ -f "$DEVICE_KEY" ] && [ "$LGPO_REGEN_KEY" != "yes" ]; then
+  echo "Existing device key found (LGPO_REGEN_KEY!=yes) → keeping."
+else
+  [ -f "$DEVICE_KEY" ] && echo "LGPO_REGEN_KEY=yes → regenerating device key."
+  generate_key
+fi
+
+# Compute device ID (SHA-256 of PKIX/PEM public key DERIVED FROM THE PRIVATE KEY)
+tmp_pub="$(mktemp)"
+tmp_pem="$(mktemp)"
+ssh-keygen -y -f "$DEVICE_KEY" > "$tmp_pub"
+ssh-keygen -e -m PKCS8 -f "$tmp_pub" > "$tmp_pem"
+DEVICE_HASH="$(sha256sum "$tmp_pem" | awk '{print $1}')"
+printf '%s\n' "$DEVICE_HASH" > "$DEVICE_HASH_FILE"
+chmod 0640 "$DEVICE_HASH_FILE" && chown root:root "$DEVICE_HASH_FILE"
+rm -f "$tmp_pub" "$tmp_pem"
+
+# ============================================================
+# 6) Prefetch policies (best-effort; may fail before deploy key enrollment)
+# ============================================================
+echo "[7/8] Prefetching policy repo into cache (best-effort)..."
 if [ -d "$CACHE_DIR/.git" ]; then
+  git -C "$CACHE_DIR" remote set-url origin "$POLICY_REPO_URL" || true
   git -C "$CACHE_DIR" fetch --depth 1 origin "$POLICY_BRANCH" || true
   git -C "$CACHE_DIR" reset --hard "origin/${POLICY_BRANCH}" || true
 else
@@ -152,82 +192,44 @@ else
 fi
 
 # ============================================================
-# 5) Device identity: create /etc/lgpo/device.key (Ed25519), pub, hash
+# 7) Enable service & dry-run once
 # ============================================================
-echo "[6/8] Ensuring device key exists at $DEVICE_KEY ..."
-generate_key() {
-  umask 0177
-  install -d -m 0750 "$DEVICE_DIR"
-  # Generate OpenSSH Ed25519 private key + .pub (no passphrase)
-  if command -v ssh-keygen >/dev/null 2>&1; then
-    ssh-keygen -t ed25519 -a 64 -N "" -C "lgpo-$(hostname)-$(cat /etc/machine-id 2>/dev/null || uuidgen)" -f "$DEVICE_KEY"
-    chmod 0600 "$DEVICE_KEY"
-    chown root:root "$DEVICE_KEY"
-    chmod 0640 "$DEVICE_PUB"
-    chown root:root "$DEVICE_PUB"
-  else
-    echo "ssh-keygen not found; please install OpenSSH client." >&2
-    exit 1
-  fi
-}
-
-
-if [ -f "$DEVICE_KEY" ]; then
-  case "$LGPO_REGEN_KEY" in
-    yes)
-      echo "LGPO_REGEN_KEY=yes → regenerating device key (existing key will be replaced)."
-      generate_key
-      ;;
-    no)
-      echo "LGPO_REGEN_KEY=no → keeping existing device key."
-      ;;
-    *)
-      if [ "$LGPO_NONINTERACTIVE" = "1" ]; then
-        echo "Non-interactive mode; keeping existing device key."
-      else
-        echo "A device key already exists at $DEVICE_KEY."
-        read -r -p "Keep existing key? [K]eep/[R]egenerate (default: K): " reply || true
-        case "${reply:-K}" in
-          r|R) generate_key ;;
-          *)   echo "Keeping existing key." ;;
-        esac
-      fi
-      ;;
-  esac
-else
-  generate_key
-fi
-
-# Compute SHA-256 of public key (PEM) → device ID
-DEVICE_HASH="$(openssl pkey -in "$DEVICE_KEY" -pubout -outform PEM | sha256sum | awk '{print $1}')"
-printf '%s\n' "$DEVICE_HASH" > "$DEVICE_HASH_FILE"
-chmod 0640 "$DEVICE_HASH_FILE"
-chown root:root "$DEVICE_HASH_FILE"
-
-# ============================================================
-# 6) Enable service & dry-run once
-# ============================================================
-echo "[7/8] Enabling lgpod service & doing a dry-run..."
+echo "[8/8] Enabling lgpod service & doing a dry-run..."
 systemctl enable --now lgpod || true
-"$BIN" --sub run --once --dry-run || true
-sudo systemctl restart lgpod
+# First run may fail until deploy key + devices.yml are in place; that's fine.
+"$BIN" --sub run --once --config="$CONFIG" || true
+
 # ============================================================
-# 7) Done — print the device hash clearly
+# Final output
 # ============================================================
-echo "[8/8] Installation complete."
 echo
-echo "LGPO device ID (SHA-256 of public key PEM):"
+echo "Installation complete."
+echo
+echo "LGPO device ID (SHA-256 of public key PEM derived from *private* key):"
 echo "  $DEVICE_HASH"
 echo
-echo "LGPO device SSH public key (paste into GitHub → Settings → Deploy keys):"
-echo "  $(cat "$DEVICE_PUB")"
+echo "LGPO device SSH public key (paste into GitHub → Settings → Deploy keys, Read-only):"
+if [ -f "$DEVICE_PUB" ]; then
+  echo "  $(cat "$DEVICE_PUB")"
+else
+  echo "  (missing $DEVICE_PUB)"
+fi
 echo
 echo "Files:"
+echo "  Binary      : $BIN"
+echo "  Config      : $CONFIG"
 echo "  Private key : $DEVICE_KEY (0600 root:root)"
 echo "  Public key  : $DEVICE_PUB (0640 root:root)"
 echo "  Hash file   : $DEVICE_HASH_FILE (0640 root:root)"
+echo "  Cache dir   : $CACHE_DIR"
 echo
 echo "Next steps:"
-echo "  1) Paste the SSH public key shown above into your GitHub repo as a READ-ONLY Deploy Key."
-echo "  2) Add this device ID to your repo's inventory/devices.yml with desired tags."
-echo "  3) Run:  sudo lgpod --sub run --once   # to apply policies immediately"
+echo "  1) Add the SSH public key shown above to your GitHub repo as a READ-ONLY Deploy Key."
+echo "  2) Put this device ID into your policy repo at inventory/devices.yml as device_pub_sha256."
+echo "  3) Commit & push the inventory change."
+echo "  4) Run:  sudo lgpod --sub run --once"
+echo
+echo "Tip: When piping with sudo, pass variables via 'sudo env', e.g.:"
+echo "  curl -fsSL https://raw.githubusercontent.com/lgpo-org/lgpod/main/scripts/install-lgpo.sh \\"
+echo "  | sudo env POLICY_REPO_URL=\"git@github.com:ORG/REPO.git\" POLICY_BRANCH=\"main\" \\"
+echo "           LGPO_REGEN_KEY=yes LGPO_FORCE_CONFIG=yes bash"
