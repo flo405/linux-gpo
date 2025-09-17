@@ -18,7 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ----- inventory/devices.yml schema -----
+// ---------- inventory/devices.yml schema ----------
 
 type DeviceInventory struct {
 	APIVersion string        `yaml:"apiVersion"`
@@ -32,32 +32,29 @@ type DeviceEntry struct {
 	Tags            map[string]string `yaml:"tags"`
 }
 
-// ----- Hashing helpers -----
+// ---------- Hashing helpers (canonical) ----------
 
-// hashOpenSSHBlob computes SHA-256 over the OpenSSH wire format of the public key
-// (the same bytes you get by base64-decoding the "ssh-ed25519 AAAA..." middle field).
+// hashOpenSSHBlob = SHA-256 over the OpenSSH wire format of the public key,
+// i.e. hash( ssh.NewPublicKey(pub).Marshal() ).
 func hashOpenSSHBlob(pub ed25519.PublicKey) (string, []byte, error) {
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
 		return "", nil, fmt.Errorf("ssh.NewPublicKey: %w", err)
 	}
-	blob := sshPub.Marshal() // canonical OpenSSH wire format
+	blob := sshPub.Marshal()
 	sum := sha256.Sum256(blob)
 
-	// PEM only for diagnostics/logs (NOT used for hashing)
+	// PEM is only for diagnostics/logs (not used in hashing).
 	der, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {
 		return "", nil, fmt.Errorf("marshal public key: %w", err)
 	}
 	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
-
 	return strings.ToLower(hex.EncodeToString(sum[:])), pemBytes, nil
 }
 
-// ComputeDeviceHashFromPrivateKey derives the Ed25519 public key from the PRIVATE key
-// (OpenSSH or PKCS#8) and returns:
-//  - hex SHA-256 of the OpenSSH public key blob (canonical), and
-//  - a PEM-encoded SPKI for diagnostics (not used in hashing).
+// ComputeDeviceHashFromPrivateKey derives pub from PRIVATE key (OpenSSH or PKCS#8)
+// and returns (hex SHA-256 of OpenSSH blob, PEM SPKI bytes for diagnostics).
 func ComputeDeviceHashFromPrivateKey(privPath string) (string, []byte, error) {
 	keyPEM, err := os.ReadFile(privPath)
 	if err != nil {
@@ -80,7 +77,7 @@ func ComputeDeviceHashFromPrivateKey(privPath string) (string, []byte, error) {
 		}
 	}
 
-	// Legacy PKCS#8 (kept for compatibility).
+	// PKCS#8 fallback (compat)
 	block, _ := pem.Decode(keyPEM)
 	if block == nil || !strings.Contains(block.Type, "PRIVATE KEY") {
 		return "", nil, errors.New("invalid PEM: no PRIVATE KEY block found")
@@ -96,8 +93,7 @@ func ComputeDeviceHashFromPrivateKey(privPath string) (string, []byte, error) {
 	return hashOpenSSHBlob(priv.Public().(ed25519.PublicKey))
 }
 
-// ComputeDeviceHashFromOpenSSHPub reads an OpenSSH-format public key file and
-// returns (hex SHA-256 of the OpenSSH blob, PEM SPKI for diagnostics).
+// Reads an OpenSSH public key file and returns (hex SHA-256 of blob, PEM SPKI bytes).
 func ComputeDeviceHashFromOpenSSHPub(pubPath string) (string, []byte, error) {
 	b, err := os.ReadFile(pubPath)
 	if err != nil {
@@ -119,12 +115,12 @@ func ComputeDeviceHashFromOpenSSHPub(pubPath string) (string, []byte, error) {
 	return hashOpenSSHBlob(ed)
 }
 
-// For run.go compatibility. We standardize on the private key we own.
+// For run.go compatibility; we standardize on computing from the private key we own.
 func ComputeDeviceHashPreferPub(deviceKeyPath string) (string, []byte, error) {
 	return ComputeDeviceHashFromPrivateKey(deviceKeyPath)
 }
 
-// ----- Inventory/tagging -----
+// ---------- Inventory → tags ----------
 
 func loadInventory(cacheDir string) (*DeviceInventory, error) {
 	path := filepath.Join(cacheDir, "inventory", "devices.yml")
@@ -139,7 +135,6 @@ func loadInventory(cacheDir string) (*DeviceInventory, error) {
 	return &inv, nil
 }
 
-// Writes a single tag (managed marker, atomic replace).
 func writeManagedTag(tagsDir, key, value string) (string, error) {
 	target := filepath.Join(tagsDir, key+".tag")
 	content := "# managed-by: lgpod-inventory\n" + strings.TrimSpace(value) + "\n"
@@ -165,7 +160,6 @@ func writeManagedTag(tagsDir, key, value string) (string, error) {
 	return target, nil
 }
 
-// Remove previously managed tags except keys in 'keep'.
 func cleanManagedTagsExcept(tagsDir string, keep map[string]struct{}) (int, error) {
 	ents, err := os.ReadDir(tagsDir)
 	if err != nil {
@@ -193,8 +187,8 @@ func cleanManagedTagsExcept(tagsDir string, keep map[string]struct{}) (int, erro
 	return removed, nil
 }
 
-// SyncInventoryTags computes the device hash (from PRIVATE key), looks it up in inventory/devices.yml,
-// writes tags; returns (deviceHash, filesWritten).
+// SyncInventoryTags: compute hash (from PRIVATE key), look it up, write tags.
+// Returns (deviceHash, filesWritten).
 func SyncInventoryTags(cacheDir, tagsDir, deviceKeyPath string) (string, int, error) {
 	hash, _, err := ComputeDeviceHashFromPrivateKey(deviceKeyPath)
 	if err != nil {
@@ -235,7 +229,7 @@ func SyncInventoryTags(cacheDir, tagsDir, deviceKeyPath string) (string, int, er
 			continue
 		}
 		if _, err := writeManagedTag(tagsDir, k, v); err != nil {
-			return hash, wrote, fmt.Errorf("write tag %q: %w", k, err)
+		 return hash, wrote, fmt.Errorf("write tag %q: %w", k, err)
 		}
 		wrote++
 	}
