@@ -198,10 +198,12 @@ apiVersion: lgpo.io/v1
 kind: DeviceInventory
 items:
   - device_pub_sha256: "80223685a0606823f104caee502edacd202d7e81ea6f948cd0bff8fb272baafc"
-    identity: "alice@example.orf"
+    identity: "alice@example.com"
     tags:
-      group: "developers"
-      ou: "it"
+      group: "controlling"
+      ou: "finance"
+      site: "vienna"
+      device: "laptop"
 ```
 
 Use in a policy selector:
