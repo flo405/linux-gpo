@@ -2,7 +2,7 @@
 # scripts/install-lgpo.sh
 # Installs lgpod, writes /etc/lgpo/agent.yaml, creates a single OpenSSH ed25519 keypair,
 # and prints BOTH the device ID (hash derived from PRIVATE key) and SSH public key.
-# Device ID hashing now normalizes the PEM to match Go's pem.EncodeToMemory (64-char wrap).
+# Device ID hashing uses SHA-256 of DER SPKI (matches agent exactly).
 
 # set -euo pipefail
 
@@ -148,28 +148,15 @@ else
   generate_key
 fi
 
-# ===== Compute device ID EXACTLY like the agent =====
-# 1) Derive OpenSSH public from PRIVATE key
-tmp_pub="$(mktemp)"; tmp_pem_norm="$(mktemp)"; tmp_der="$(mktemp)"
+# ===== Compute device ID EXACTLY like the agent (SHA-256 of DER SPKI) =====
+tmp_pub="$(mktemp)"; tmp_der="$(mktemp)"
 ssh-keygen -y -f "$DEVICE_KEY" > "$tmp_pub"
-
-# 2) Convert to DER SubjectPublicKeyInfo
-#    (ssh-keygen -e -m PKCS8 creates a PEM "PUBLIC KEY"; we convert that to DER)
-tmp_pem="$(mktemp)"
-ssh-keygen -e -m PKCS8 -f "$tmp_pub" > "$tmp_pem"
-openssl pkey -pubin -inform PEM -in "$tmp_pem" -outform DER -out "$tmp_der"
-
-# 3) Re-encode to PEM with 64-character line wrapping (matches Go's pem.EncodeToMemory)
-{
-  printf '-----BEGIN PUBLIC KEY-----\n'
-  base64 -w 64 "$tmp_der"
-  printf '\n-----END PUBLIC KEY-----\n'
-} > "$tmp_pem_norm"
-
-DEVICE_HASH="$(sha256sum "$tmp_pem_norm" | awk '{print $1}')"
+ssh-keygen -e -m PKCS8 -f "$tmp_pub" \
+  | openssl pkey -pubin -inform PEM -outform DER -out "$tmp_der"
+DEVICE_HASH="$(sha256sum "$tmp_der" | awk '{print $1}')"
 printf '%s\n' "$DEVICE_HASH" > "$DEVICE_HASH_FILE"
 chmod 0640 "$DEVICE_HASH_FILE" && chown root:root "$DEVICE_HASH_FILE"
-rm -f "$tmp_pub" "$tmp_pem" "$tmp_der" "$tmp_pem_norm"
+rm -f "$tmp_pub" "$tmp_der"
 
 # ===== 6) Prefetch policies (best-effort) =====
 echo "[7/8] Prefetching policy repo into cache (best-effort)..."
@@ -190,7 +177,7 @@ systemctl enable --now lgpod || true
 echo
 echo "Installation complete."
 echo
-echo "LGPO device ID (SHA-256 of normalized PEM from *private* key):"
+echo "LGPO device ID (SHA-256 of SPKI DER derived from *private* key):"
 echo "  $DEVICE_HASH"
 echo
 echo "LGPO device SSH public key (paste into GitHub → Deploy keys, Read-only):"
