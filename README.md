@@ -1,6 +1,6 @@
 # lgpo — Linux Group Policy Objects, reimagined with GitOps
 
-Group Policy Objects (GPOs) arrived with Active Directory in February 2000. 25 years later Linux gets an enterprise desktop configuration management system.
+Windows Group Policy Objects (GPOs) arrived with Active Directory in February 2000. 25 years later Linux gets an enterprise desktop configuration management system.
 
 In contrast to Windows, Linux is diverse: different distros (Debian, Fedora, etc.) different desktops (GNOME, KDE, etc.), and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules, etc.). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. 
 
