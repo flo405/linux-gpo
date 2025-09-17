@@ -42,7 +42,7 @@ echo "[1/8] Installing prerequisites..."
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update -y
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    git ca-certificates curl build-essential pkg-config golang-go \
+    git ca-certificates curl openssh-client build-essential pkg-config golang-go \
     dconf-cli policykit-1 initramfs-tools openssl jq
 else
   echo "This script targets Debian/Ubuntu (apt)."
@@ -111,7 +111,7 @@ AmbientCapabilities=
 ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo /etc/lgpo
 StateDirectory=lgpo
 LogsDirectory=lgpo
-# Service runs as root (MVP). Consider a dedicated user later.
+# Service runs as root.
 
 [Install]
 WantedBy=multi-user.target
@@ -158,15 +158,19 @@ echo "[6/8] Ensuring device key exists at $DEVICE_KEY ..."
 generate_key() {
   umask 0177
   install -d -m 0750 "$DEVICE_DIR"
-  # Generate Ed25519 private key
-  openssl genpkey -algorithm Ed25519 -out "$DEVICE_KEY"
-  chmod 0600 "$DEVICE_KEY"
-  chown root:root "$DEVICE_KEY"
-  # Extract public key (PEM)
-  openssl pkey -in "$DEVICE_KEY" -pubout -out "$DEVICE_PUB"
-  chmod 0640 "$DEVICE_PUB"
-  chown root:root "$DEVICE_PUB"
+  # Generate OpenSSH Ed25519 private key + .pub (no passphrase)
+  if command -v ssh-keygen >/dev/null 2>&1; then
+    ssh-keygen -t ed25519 -a 64 -N "" -C "lgpo-$(hostname)-$(cat /etc/machine-id 2>/dev/null || uuidgen)" -f "$DEVICE_KEY"
+    chmod 0600 "$DEVICE_KEY"
+    chown root:root "$DEVICE_KEY"
+    chmod 0640 "$DEVICE_PUB"
+    chown root:root "$DEVICE_PUB"
+  else
+    echo "ssh-keygen not found; please install OpenSSH client." >&2
+    exit 1
+  fi
 }
+
 
 if [ -f "$DEVICE_KEY" ]; then
   case "$LGPO_REGEN_KEY" in
@@ -212,8 +216,13 @@ sudo systemctl restart lgpod
 # ============================================================
 echo "[8/8] Installation complete."
 echo
+echo "[8/8] Installation complete."
+echo
 echo "LGPO device ID (SHA-256 of public key PEM):"
 echo "  $DEVICE_HASH"
+echo
+echo "LGPO device SSH public key (paste into GitHub → Settings → Deploy keys):"
+echo "  $(cat "$DEVICE_PUB")"
 echo
 echo "Files:"
 echo "  Private key : $DEVICE_KEY (0600 root:root)"
@@ -221,5 +230,7 @@ echo "  Public key  : $DEVICE_PUB (0640 root:root)"
 echo "  Hash file   : $DEVICE_HASH_FILE (0640 root:root)"
 echo
 echo "Next steps:"
-echo "  1) Add this device ID to your repo's inventory/devices.yml with desired tags."
-echo "  2) Run:  sudo lgpod --sub run --once   # to apply policies immediately"
+echo "  1) Paste the SSH public key shown above into your GitHub repo as a READ-ONLY Deploy Key."
+echo "  2) Add this device ID to your repo's inventory/devices.yml with desired tags."
+echo "  3) Run:  sudo lgpod --sub run --once   # to apply policies immediately"
+
