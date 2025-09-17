@@ -20,7 +20,7 @@ STATE_DIR="${STATE_DIR:-/var/lib/lgpo}"
 LOG_DIR="${LOG_DIR:-/var/log/lgpo}"
 DEVICE_DIR="${DEVICE_DIR:-/etc/lgpo}"
 DEVICE_KEY="${DEVICE_KEY:-$DEVICE_DIR/device.key}"
-DEVICE_PUB="${DEVICE_PUB:-$DEVICE_DIR/device.pub}"
+DEVICE_PUB="${DEVICE_PUB:-$DEVICE_DIR/device.key.pub}"
 DEVICE_HASH_FILE="${DEVICE_HASH_FILE:-$DEVICE_DIR/device.pub.sha256}"
 
 # Behavior flags
