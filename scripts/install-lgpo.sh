@@ -2,8 +2,7 @@
 # scripts/install-lgpo.sh
 # Installs lgpod, writes /etc/lgpo/agent.yaml, creates a single OpenSSH ed25519 keypair,
 # and prints BOTH the device ID (hash derived from PRIVATE key) and SSH public key.
-# Device ID hashing uses SHA-256 of the RAW Ed25519 public key bytes (matches agent exactly).
-
+# Device ID hashing uses SHA-256 of the RAW Ed25519 public key bytes (matches agent).
 # set -euo pipefail
 
 # ===== Root check =====
@@ -152,7 +151,6 @@ fi
 # Derive OpenSSH public from PRIVATE key, extract base64 field, decode to raw bytes, hash it.
 pub_line="$(ssh-keygen -y -f "$DEVICE_KEY")"                 # "ssh-ed25519 AAAA.... comment"
 pub_b64="$(printf '%s\n' "$pub_line" | awk '{print $2}')"    # base64 blob
-# Decode base64 to raw 32-byte Ed25519 public key
 DEVICE_HASH="$(
   printf '%s' "$pub_b64" | base64 -d | sha256sum | awk '{print $1}'
 )"
