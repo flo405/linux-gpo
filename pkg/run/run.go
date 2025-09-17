@@ -89,10 +89,29 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	r.lastFacts = facts.Discover()
 
 	// 2) Ensure the repo cache is up-to-date (policies + inventory)
-	commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
-	if err != nil {
-		return err
-	}
+	\
+        commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
+        if err != nil {
+            // Enrollment-friendly guidance for private repos or auth/permission issues
+            lower := strings.ToLower(err.Error())
+            if strings.Contains(lower, "permission") || strings.Contains(lower, "access") || strings.Contains(lower, "auth") {
+                // Try to compute device hash and load OpenSSH public key for admin enrollment
+                hash, _, _ := inventory.ComputeDeviceHashPreferPub("/etc/lgpo/device.key")
+                pub := ""
+                if b, readErr := os.ReadFile("/etc/lgpo/device.pub"); readErr == nil {
+                    pub = strings.TrimSpace(string(b))
+                }
+                r.log.Warn("enrollment",
+                    "hint", "Private policy repo? Add this device as READ-ONLY deploy key and put its hash into inventory/devices.yml",
+                    "repo", r.cfg.Repo,
+                    "branch", r.cfg.Branch,
+                    "device", hash,
+                    "pubkey", pub,
+                )
+            }
+            return err
+        }
+
 
 	// 3) Sync inventory → write authoritative tags from inventory/devices.yml
 	deviceHash, wrote, invErr := inventory.SyncInventoryTags(
