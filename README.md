@@ -1,17 +1,17 @@
 # lgpo — Linux Group Policy Objects, reimagined with GitOps
 
-Group Policy Objects (GPOs) arrived with Active Directory in February 2000. Today, AD and GPOs are considered insecure by default and design since compromised controllers, lax permissions, or poorly reviewed changes can broadcast malware or enable lateral movement across the entire domain. Admins still rely on them for configuration management. In contrast to Windows, Linux is diverse: different desktops (GNOME, KDE, etc.), different distros, and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules…). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. 
+Group Policy Objects (GPOs) arrived with Active Directory in February 2000. 25 years later Linux get an enterprise desktop configuration management system.
 
-lpod aims to combine the best of both worlds. It is built to carry AD’s standardization ethos into a cross-platform, cloud-first world, minimizing the attack surface and working alongside modern IdPs and a well established change management process. 
+In contrast to Windows, Linux is diverse: different distros (Debian, Fedora, etc.) different desktops (GNOME, KDE, etc.), and different configuration systems (polkit, dconf/gsettings, systemd, kernel modules, etc.). That diversity makes “Linux GPOs” inherently harder. There is no single **Registry**, and many subsystems each speak their own language. 
 
 **lgpo** is powered by 
-- a **unified YAML-based policy language** that is rendered into native Linux config systems by
+- a **unified YAML-based policy language** that is rendered into different native Linux config systems by
 - a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo.
 
 Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and inventory mangement.
 
 ## Why GitOps
-- 🏛️  Many organizations already trust in GitOps to secure their crown-jewels such as Kubernetes clusters. Use this **well established process** to manage Linux workstations too.
+- 🏛️  Many organizations already trust in GitOps to secure their crown-jewels such as k8s clusters. Use this **well established process** to manage Linux workstations too.
 - 👀  With GitOps, it's easy to enforce the **four-eyes principle** and status checks (CI, linters, YAML/schema validators, policy render tests) before merge.  
 - 🔐 **Change control:** every edit is a PR with history, reviews, and a merge commit you can audit.  
 - 🔁 **Reproducibility:** endpoints apply a specific commit; you can correlate any host’s state with the exact Git SHA.  
