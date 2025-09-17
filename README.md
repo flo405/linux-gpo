@@ -1,4 +1,4 @@
-# lgpo — Linux Group Policy Objects, reimagined with GitOps
+# lgpo — Linux Group Policy Objects
 
 Windows Group Policy Objects (GPOs) arrived with Active Directory in February 2000. 25 years later, Linux gets an desktop configuration management system that enables organizations to programmatically enforce compliance across a fleet of Linux workstations. 
 
