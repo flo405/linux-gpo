@@ -1,6 +1,8 @@
 package inventory
 
 import (
+	"golang.org/x/crypto/ssh"
+
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/x509"
@@ -223,4 +225,33 @@ func CleanManagedTags(tagsDir string) (int, error) {
 		}
 	}
 	return removed, nil
+}
+
+
+// ComputeDeviceHashFromOpenSSHPub reads an OpenSSH-format public key (e.g., "ssh-ed25519 AAAA... comment"),
+// converts it to PKIX PEM, and returns (hex sha256 of PEM, PEM-bytes).
+func ComputeDeviceHashFromOpenSSHPub(pubPath string) (string, []byte, error) {
+	b, err := os.ReadFile(pubPath)
+	if err != nil { return "", nil, fmt.Errorf("read public key: %w", err) }
+	pk, _, _, _, err := ssh.ParseAuthorizedKey(b)
+	if err != nil { return "", nil, fmt.Errorf("parse OpenSSH public key: %w", err) }
+	cp, ok := pk.(ssh.CryptoPublicKey)
+	if !ok { return "", nil, errors.New("public key does not expose crypto key") }
+	goPub := cp.CryptoPublicKey()
+	der, err := x509.MarshalPKIXPublicKey(goPub)
+	if err != nil { return "", nil, fmt.Errorf("marshal public key: %w", err) }
+	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+	sum := sha256.Sum256(pubPEM)
+	return strings.ToLower(hex.EncodeToString(sum[:])), pubPEM, nil
+}
+
+
+// ComputeDeviceHashPreferPub tries to use /etc/lgpo/device.pub (OpenSSH) first.
+// If not present, falls back to legacy PKCS#8 private key format at deviceKeyPath.
+func ComputeDeviceHashPreferPub(deviceKeyPath string) (string, []byte, error) {
+	pubPath := strings.TrimSuffix(deviceKeyPath, ".key") + ".pub"
+	if _, err := os.Stat(pubPath); err == nil {
+		return ComputeDeviceHashFromOpenSSHPub(pubPath)
+	}
+	return ComputeDeviceHashFromPrivateKey(deviceKeyPath)
 }
