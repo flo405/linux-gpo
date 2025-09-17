@@ -97,7 +97,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
                 // Try to compute device hash and load OpenSSH public key for admin enrollment
                 hash, _, _ := inventory.ComputeDeviceHashPreferPub("/etc/lgpo/device.key")
                 pub := ""
-                if b, readErr := os.ReadFile("/etc/lgpo/device.pub"); readErr == nil {
+                if b, readErr := os.ReadFile("/etc/lgpo/device.key.pub"); readErr == nil {
                     pub = strings.TrimSpace(string(b))
                 }
                 r.log.Warn("enrollment",
