@@ -8,7 +8,7 @@ lpod aims to combine the best of both worlds. It is built to carry AD’s standa
 - a **unified YAML-based policy language** that is rendered into native Linux config systems by
 - a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo.
 
-Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and device mangement.
+Visit the [GitOps example repo](https://github.com/lgpo-org/lgpo-gitops-example) to learn more about policies and inventory mangement.
 
 ## Why GitOps
 - 🏛️  Many organizations already trust in GitOps to secure their crown-jewels such as Kubernetes clusters. Use this **well established process** to manage Linux workstations too.
