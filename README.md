@@ -8,7 +8,7 @@ In contrast to Windows, Linux is diverse: different distros (Debian, Fedora, etc
 - a **unified YAML-based policy language** that is rendered into different native Linux config systems by
 - a small, security-first agent (**`lgpod`**) that pulls policies from a Git repo.
 
-lgopd simply matches tags of your polcy objects, such as this example policy that blocks usb storage devices on `laptops` and `kiosk` devices 
+lgopd simply matches tags of your policy objects, such as this example policy that blocks usb storage devices on `laptops` and `kiosk` devices 
 
 ```yaml
 apiVersion: lgpo.io/v1
