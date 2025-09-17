@@ -20,7 +20,7 @@ STATE_DIR="${STATE_DIR:-/var/lib/lgpo}"
 LOG_DIR="${LOG_DIR:-/var/log/lgpo}"
 DEVICE_DIR="${DEVICE_DIR:-/etc/lgpo}"
 DEVICE_KEY="${DEVICE_KEY:-$DEVICE_DIR/device.key}"
-DEVICE_PUB="${DEVICE_PUB:-$DEVICE_DIR/device.key.pub}"
+DEVICE_PUB="${DEVICE_PUB:-$DEVICE_DIR/device.pub}"
 DEVICE_HASH_FILE="${DEVICE_HASH_FILE:-$DEVICE_DIR/device.pub.sha256}"
 
 # Behavior flags
@@ -111,7 +111,7 @@ AmbientCapabilities=
 ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo /etc/lgpo
 StateDirectory=lgpo
 LogsDirectory=lgpo
-# Service runs as root.
+# Service runs as root (MVP). Consider a dedicated user later.
 
 [Install]
 WantedBy=multi-user.target
@@ -216,8 +216,6 @@ sudo systemctl restart lgpod
 # ============================================================
 echo "[8/8] Installation complete."
 echo
-echo "[8/8] Installation complete."
-echo
 echo "LGPO device ID (SHA-256 of public key PEM):"
 echo "  $DEVICE_HASH"
 echo
@@ -233,4 +231,3 @@ echo "Next steps:"
 echo "  1) Paste the SSH public key shown above into your GitHub repo as a READ-ONLY Deploy Key."
 echo "  2) Add this device ID to your repo's inventory/devices.yml with desired tags."
 echo "  3) Run:  sudo lgpod --sub run --once   # to apply policies immediately"
-
