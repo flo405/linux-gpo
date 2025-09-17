@@ -7,7 +7,7 @@ In contrast to Windows, Linux is gloriously diverse: different distros (Debian, 
 **lgpo** is powered by 
 - a **simple unified YAML-based policy language** that is rendered into different native Linux config systems by
 - a small, security-first agent (**`lgpod`**) that pulls policies and device configurations from
-- a **Git repository** thaat acts as single source of truth (you don't even need your own server or VM – it can run "serverless" on a SaaS platform like GitHub)
+- a **Git repository** thaat acts as single source of truth
 
 ## Policy as Code
 
