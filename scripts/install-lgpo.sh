@@ -2,7 +2,7 @@
 # scripts/install-lgpo.sh
 # Installs lgpod, writes /etc/lgpo/agent.yaml, creates a single OpenSSH ed25519 keypair,
 # and prints BOTH the device ID (hash derived from PRIVATE key) and SSH public key.
-# Device ID hashing uses SHA-256 of DER SPKI (matches agent exactly).
+# Device ID hashing uses SHA-256 of the RAW Ed25519 public key bytes (matches agent exactly).
 
 # set -euo pipefail
 
@@ -148,15 +148,16 @@ else
   generate_key
 fi
 
-# ===== Compute device ID EXACTLY like the agent (SHA-256 of DER SPKI) =====
-tmp_pub="$(mktemp)"; tmp_der="$(mktemp)"
-ssh-keygen -y -f "$DEVICE_KEY" > "$tmp_pub"
-ssh-keygen -e -m PKCS8 -f "$tmp_pub" \
-  | openssl pkey -pubin -inform PEM -outform DER -out "$tmp_der"
-DEVICE_HASH="$(sha256sum "$tmp_der" | awk '{print $1}')"
+# ===== Compute device ID EXACTLY like the agent (SHA-256 of RAW pubkey bytes) =====
+# Derive OpenSSH public from PRIVATE key, extract base64 field, decode to raw bytes, hash it.
+pub_line="$(ssh-keygen -y -f "$DEVICE_KEY")"                 # "ssh-ed25519 AAAA.... comment"
+pub_b64="$(printf '%s\n' "$pub_line" | awk '{print $2}')"    # base64 blob
+# Decode base64 to raw 32-byte Ed25519 public key
+DEVICE_HASH="$(
+  printf '%s' "$pub_b64" | base64 -d | sha256sum | awk '{print $1}'
+)"
 printf '%s\n' "$DEVICE_HASH" > "$DEVICE_HASH_FILE"
 chmod 0640 "$DEVICE_HASH_FILE" && chown root:root "$DEVICE_HASH_FILE"
-rm -f "$tmp_pub" "$tmp_der"
 
 # ===== 6) Prefetch policies (best-effort) =====
 echo "[7/8] Prefetching policy repo into cache (best-effort)..."
@@ -177,7 +178,7 @@ systemctl enable --now lgpod || true
 echo
 echo "Installation complete."
 echo
-echo "LGPO device ID (SHA-256 of SPKI DER derived from *private* key):"
+echo "LGPO device ID (SHA-256 of RAW Ed25519 public key derived from *private* key):"
 echo "  $DEVICE_HASH"
 echo
 echo "LGPO device SSH public key (paste into GitHub → Deploy keys, Read-only):"
