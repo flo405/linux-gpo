@@ -99,6 +99,7 @@ AmbientCapabilities=
 ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo /etc/lgpo
 CapabilityBoundingSet=CAP_SYS_MODULE
 AmbientCapabilities=CAP_SYS_MODULE
+SystemCallFilter=@system-service delete_module
 StateDirectory=lgpo
 LogsDirectory=lgpo
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
