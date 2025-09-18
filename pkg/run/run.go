@@ -89,28 +89,27 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	r.lastFacts = facts.Discover()
 
 	// 2) Ensure the repo cache is up-to-date (policies + inventory)
-        commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
-        if err != nil {
-            // Enrollment-friendly guidance for private repos or auth/permission issues
-            lower := strings.ToLower(err.Error())
-            if strings.Contains(lower, "permission") || strings.Contains(lower, "access") || strings.Contains(lower, "auth") {
-                // Try to compute device hash and load OpenSSH public key for admin enrollment
-                hash, _, _ := inventory.ComputeDeviceHashPreferPub("/etc/lgpo/device.key")
-                pub := ""
-                if b, readErr := os.ReadFile("/etc/lgpo/device.key.pub"); readErr == nil {
-                    pub = strings.TrimSpace(string(b))
-                }
-                r.log.Warn("enrollment",
-                    "hint", "Private policy repo? Add this device as READ-ONLY deploy key and put its hash into inventory/devices.yml",
-                    "repo", r.cfg.Repo,
-                    "branch", r.cfg.Branch,
-                    "device", hash,
-                    "pubkey", pub,
-                )
-            }
-            return err
-        }
-
+	commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
+	if err != nil {
+		// Enrollment-friendly guidance for private repos or auth/permission issues
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "permission") || strings.Contains(lower, "access") || strings.Contains(lower, "auth") {
+			// Try to compute device hash and load OpenSSH public key for admin enrollment
+			hash, _, _ := inventory.ComputeDeviceHashPreferPub("/etc/lgpo/device.key")
+			pub := ""
+			if b, readErr := os.ReadFile("/etc/lgpo/device.key.pub"); readErr == nil {
+				pub = strings.TrimSpace(string(b))
+			}
+			r.log.Warn("enrollment",
+				"hint", "Private policy repo? Add this device as READ-ONLY deploy key and put its hash into inventory/devices.yml",
+				"repo", r.cfg.Repo,
+				"branch", r.cfg.Branch,
+				"device", hash,
+				"pubkey", pub,
+			)
+		}
+		return err
+	}
 
 	// 3) Sync inventory → write authoritative tags from inventory/devices.yml
 	deviceHash, wrote, invErr := inventory.SyncInventoryTags(
@@ -209,7 +208,8 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			desiredPaths[sp] = struct{}{}
 			desiredPaths[lp] = struct{}{}
 			desiredManaged = append(desiredManaged, managedItem{Path: sp}, managedItem{Path: lp})
-			dconfTouched = true // OK if true when anything changes
+			// We want to recompile the dconf DB whenever any dconf policy is selected or removed.
+			dconfTouched = true
 
 		case "ModprobePolicy":
 			var p mp.Policy
@@ -292,7 +292,15 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 
 	// Post-steps
 	if !dry && dconfTouched {
-		_ = exec.CommandContext(ctx, "dconf", "update").Run()
+		// Ensure GNOME reads the system db ("local") and recompile the DB.
+		if err := ensureDconfProfile(); err != nil {
+			r.log.Warn("dconf", "ensure profile failed", "err", err.Error())
+		}
+		if err := runDconfUpdate(ctx, r); err != nil {
+			r.log.Warn("dconf", "update failed", "err", err.Error())
+		} else {
+			r.log.Info("dconf", "updated system database")
+		}
 	}
 	if !dry && initramfsTouched {
 		_ = exec.CommandContext(ctx, "update-initramfs", "-u").Run()
@@ -378,6 +386,56 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 	return true, nil
 }
 
+// ensureDconfProfile guarantees that the system dconf database ("local")
+// is included in the user profile so system defaults/locks take effect.
+func ensureDconfProfile() error {
+	const path = "/etc/dconf/profile/user"
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	content := []byte("user-db:user\nsystem-db:local\n")
+	if err := os.WriteFile(tmp, content, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// runDconfUpdate finds and runs `dconf update`, logging any failure.
+// It tolerates a minimal service PATH and falls back to /usr/bin/dconf if needed.
+func runDconfUpdate(ctx context.Context, r *Runner) error {
+	bin, err := exec.LookPath("dconf")
+	if err != nil {
+		// try common absolute path as a fallback
+		if _, st := os.Stat("/usr/bin/dconf"); st == nil {
+			bin = "/usr/bin/dconf"
+		} else {
+			return fmt.Errorf("dconf not found in PATH: %v", err)
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, bin, "update")
+
+	// Ensure we have a sane PATH when running under a minimal service environment.
+	if os.Getenv("PATH") == "" {
+		cmd.Env = append(os.Environ(), "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	} else {
+		cmd.Env = os.Environ()
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v (output: %s)", err, strings.TrimSpace(string(out)))
+	}
+	if len(out) > 0 {
+		r.log.Info("dconf", "update output", "out", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // loadTags reads *.tag files and returns key->value.
 // It ignores blank lines and lines starting with '#', and takes the first value line.
 func loadTags(dir string) map[string]string {
@@ -388,7 +446,7 @@ func loadTags(dir string) map[string]string {
 	}
 	for _, e := range ents {
 		if e.IsDir() {
-		 continue
+			continue
 		}
 		name := e.Name()
 		if !strings.HasSuffix(name, ".tag") {
