@@ -99,6 +99,8 @@ AmbientCapabilities=
 ReadWritePaths=/etc/polkit-1/rules.d /etc/dconf/db/local.d /etc/modprobe.d /var/lib/lgpo /var/log/lgpo /etc/lgpo
 StateDirectory=lgpo
 LogsDirectory=lgpo
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+User=root
 
 [Install]
 WantedBy=multi-user.target
@@ -124,6 +126,11 @@ cacheDir: ${CACHE_DIR}
 EOF
   chmod 0640 "$CONFIG"
 fi
+
+sudo tee /etc/dconf/profile/user >/dev/null <<'EOF'
+user-db:user
+system-db:local
+EOF
 
 # ===== 5) Single keypair (SSH auth + device ID) =====
 echo "[6/8] Ensuring device key exists at $DEVICE_KEY ..."
