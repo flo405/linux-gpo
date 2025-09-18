@@ -291,22 +291,31 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	}
 
 	// Post-steps
-	if !dry && dconfTouched {
-		// Ensure GNOME reads the system db ("local") and recompile the DB.
-		if err := ensureDconfProfile(); err != nil {
-			r.log.Warn("dconf", "ensure profile failed", "err", err.Error())
-		}
-		if err := runDconfUpdate(ctx, r); err != nil {
-			r.log.Warn("dconf", "update failed", "err", err.Error())
-		} else {
-			r.log.Info("dconf", "updated system database")
-		}
-	}
+
 	if !dry && initramfsTouched {
 		_ = exec.CommandContext(ctx, "update-initramfs", "-u").Run()
 	}
 	if !dry {
 		r.saveManaged(desiredManaged)
+	}
+
+
+	if !dry && dconfTouched {
+    	if err := ensureDconfProfile(); err != nil {
+        	r.log.Warn("dconf", "ensure profile failed", "err", err.Error())
+    	}
+    	// try compile first for clearer errors
+   		if err := exec.CommandContext(ctx, "/usr/bin/dconf", "compile", "/tmp/local.dconf", "/etc/dconf/db/local.d").Run(); err != nil {
+        	r.log.Warn("dconf", "compile failed", "err", err.Error())
+    	}
+    	// then update the system db
+    	cmd := exec.CommandContext(ctx, "/usr/bin/dconf", "update")
+    	out, err := cmd.CombinedOutput()
+    	if err != nil {
+        	r.log.Warn("dconf", "update failed", "err", err.Error(), "out", strings.TrimSpace(string(out)))
+    	} else {
+        	r.log.Info("dconf", "updated system database")
+    	}
 	}
 
 	// Status + audit
