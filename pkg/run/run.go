@@ -130,7 +130,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	polDir := filepath.Join(r.cfg.CacheDir, r.cfg.PoliciesDir())
 
 	var toApply []applyItem
-	dconfTouched := false
+	dconfTouched := false   // now only flips when files actually change or dconf files are removed
 	initramfsTouched := false
 
 	desiredPaths := map[string]struct{}{}
@@ -208,8 +208,6 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			desiredPaths[sp] = struct{}{}
 			desiredPaths[lp] = struct{}{}
 			desiredManaged = append(desiredManaged, managedItem{Path: sp}, managedItem{Path: lp})
-			// We want to recompile the dconf DB whenever any dconf policy is selected or removed.
-			dconfTouched = true
 
 		case "ModprobePolicy":
 			var p mp.Policy
@@ -267,6 +265,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			} else {
 				_ = os.Remove(path)
 				removed++
+				// flip dconf/initramfs touch flags only when we removed corresponding files
 				if strings.HasPrefix(path, "/etc/dconf/db/local.d/") {
 					dconfTouched = true
 				}
@@ -287,35 +286,36 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		}
 		if c {
 			changed++
+			// only mark dconfTouched when we actually changed a dconf file
+			if strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/") ||
+				strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/locks/") {
+				dconfTouched = true
+			}
 		}
 	}
 
 	// Post-steps
-
+	if !dry && dconfTouched {
+		// Ensure GNOME reads the system db ("local") and recompile the DB.
+		if err := ensureDconfProfile(); err != nil {
+			r.log.Warn("dconf", "ensure profile failed", "err", err.Error())
+		}
+		// compile first for clearer errors
+		if out, err := exec.CommandContext(ctx, "/usr/bin/dconf", "compile", "/tmp/local.dconf", "/etc/dconf/db/local.d").CombinedOutput(); err != nil {
+			r.log.Warn("dconf", "compile failed", "err", err.Error(), "out", strings.TrimSpace(string(out)))
+		}
+		// then update the full system dbs
+		if err := runDconfUpdate(ctx, r); err != nil {
+			r.log.Warn("dconf", "update failed", "err", err.Error())
+		} else {
+			r.log.Info("dconf", "updated system database")
+		}
+	}
 	if !dry && initramfsTouched {
 		_ = exec.CommandContext(ctx, "update-initramfs", "-u").Run()
 	}
 	if !dry {
 		r.saveManaged(desiredManaged)
-	}
-
-
-	if !dry && dconfTouched {
-    	if err := ensureDconfProfile(); err != nil {
-        	r.log.Warn("dconf", "ensure profile failed", "err", err.Error())
-    	}
-    	// try compile first for clearer errors
-   		if err := exec.CommandContext(ctx, "/usr/bin/dconf", "compile", "/tmp/local.dconf", "/etc/dconf/db/local.d").Run(); err != nil {
-        	r.log.Warn("dconf", "compile failed", "err", err.Error())
-    	}
-    	// then update the system db
-    	cmd := exec.CommandContext(ctx, "/usr/bin/dconf", "update")
-    	out, err := cmd.CombinedOutput()
-    	if err != nil {
-        	r.log.Warn("dconf", "update failed", "err", err.Error(), "out", strings.TrimSpace(string(out)))
-    	} else {
-        	r.log.Info("dconf", "updated system database")
-    	}
 	}
 
 	// Status + audit
