@@ -46,7 +46,6 @@ func New(cfg *config.Config, l *lglog.Logger) *Runner {
 }
 
 func (r *Runner) managedPath() string {
-	// put it next to status.json
 	return filepath.Join(filepath.Dir(r.cfg.StatusFile), "managed.json")
 }
 func (r *Runner) loadManaged() managedState {
@@ -85,16 +84,14 @@ func (r *Runner) ReadStatus() (status.Status, error) {
 func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	start := time.Now()
 
-	// 1) Refresh facts each run
+	// 1) Refresh facts
 	r.lastFacts = facts.Discover()
 
-	// 2) Ensure the repo cache is up-to-date (policies + inventory)
+	// 2) Update repo cache
 	commit, err := git.Ensure(r.cfg.Repo, r.cfg.Branch, r.cfg.CacheDir)
 	if err != nil {
-		// Enrollment-friendly guidance for private repos or auth/permission issues
 		lower := strings.ToLower(err.Error())
 		if strings.Contains(lower, "permission") || strings.Contains(lower, "access") || strings.Contains(lower, "auth") {
-			// Try to compute device hash and load OpenSSH public key for admin enrollment
 			hash, _, _ := inventory.ComputeDeviceHashPreferPub("/etc/lgpo/device.key")
 			pub := ""
 			if b, readErr := os.ReadFile("/etc/lgpo/device.key.pub"); readErr == nil {
@@ -111,7 +108,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		return err
 	}
 
-	// 3) Sync inventory → write authoritative tags from inventory/devices.yml
+	// 3) Inventory sync → tags
 	deviceHash, wrote, invErr := inventory.SyncInventoryTags(
 		r.cfg.CacheDir,
 		r.cfg.TagsDir,
@@ -122,19 +119,21 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	} else {
 		r.log.Warn("inventory", "synced", "device", deviceHash, "wrote", fmt.Sprintf("%d", wrote))
 	}
-
-	// 4) Load tags AFTER syncing inventory so policy logic sees fresh tags
 	r.lastTags = loadTags(r.cfg.TagsDir)
 
-	// 5) Evaluate policies
+	// 4) Evaluate policies
 	polDir := filepath.Join(r.cfg.CacheDir, r.cfg.PoliciesDir())
 
 	var toApply []applyItem
-	dconfTouched := false   // now only flips when files actually change or dconf files are removed
+	dconfTouched := false
 	initramfsTouched := false
 
 	desiredPaths := map[string]struct{}{}
 	desiredManaged := make([]managedItem, 0, 64)
+
+	// NEW: instantApply support
+	var runtimeModprobe []string
+	changedModprobe := false
 
 	_ = filepath.WalkDir(polDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -163,11 +162,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			sel := selector.Sel{
-				Facts:         p.Selector.Facts,
-				Tags:          p.Selector.Tags,
-				HostnameRegex: p.Selector.HostnameRegex,
-			}
+			sel := selector.Sel{Facts: p.Selector.Facts, Tags: p.Selector.Tags, HostnameRegex: p.Selector.HostnameRegex}
 			if !sel.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
@@ -187,11 +182,7 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			sel := selector.Sel{
-				Facts:         p.Selector.Facts,
-				Tags:          p.Selector.Tags,
-				HostnameRegex: p.Selector.HostnameRegex,
-			}
+			sel := selector.Sel{Facts: p.Selector.Facts, Tags: p.Selector.Tags, HostnameRegex: p.Selector.HostnameRegex}
 			if !sel.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
@@ -215,15 +206,11 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 				r.log.Warn("yaml", err.Error(), "file", path)
 				return nil
 			}
-			sel := selector.Sel{
-				Facts:         p.Selector.Facts,
-				Tags:          p.Selector.Tags,
-				HostnameRegex: p.Selector.HostnameRegex,
-			}
+			sel := selector.Sel{Facts: p.Selector.Facts, Tags: p.Selector.Tags, HostnameRegex: p.Selector.HostnameRegex}
 			if !sel.Match(selector.Context{Facts: r.lastFacts, Tags: r.lastTags}) {
 				return nil
 			}
-			conf, _, err := mp.Render(&p)
+			conf, mods, err := mp.Render(&p)
 			if err != nil {
 				r.log.Warn("render", err.Error(), "file", path)
 				return nil
@@ -232,8 +219,12 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 			toApply = append(toApply, applyItem{Path: tgt, Data: conf, Mode: 0o644})
 			desiredPaths[tgt] = struct{}{}
 			desiredManaged = append(desiredManaged, managedItem{Path: tgt})
+
 			if p.Spec.UpdateInitramfs {
 				initramfsTouched = true
+			}
+			if p.Spec.InstantApply {
+				runtimeModprobe = append(runtimeModprobe, mods...)
 			}
 
 		default:
@@ -246,7 +237,6 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 	removed := 0
 
 	for _, it := range prev.Items {
-		// only delete files we own and ONLY under our allowlist
 		path := it.Path
 		if _, stillDesired := desiredPaths[path]; stillDesired {
 			continue
@@ -258,19 +248,17 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		if !allowed {
 			continue
 		}
-		// drift-safe: only remove if file actually exists
 		if _, err := os.Stat(path); err == nil {
 			if dry {
 				removed++
 			} else {
 				_ = os.Remove(path)
 				removed++
-				// flip dconf/initramfs touch flags only when we removed corresponding files
 				if strings.HasPrefix(path, "/etc/dconf/db/local.d/") {
 					dconfTouched = true
 				}
 				if strings.HasPrefix(path, "/etc/modprobe.d/") {
-					initramfsTouched = true
+					changedModprobe = true
 				}
 			}
 		}
@@ -286,34 +274,47 @@ func (r *Runner) RunOnce(ctx context.Context, dry bool, trigger string) error {
 		}
 		if c {
 			changed++
-			// only mark dconfTouched when we actually changed a dconf file
 			if strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/") ||
 				strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/locks/") {
 				dconfTouched = true
 			}
+			if strings.HasPrefix(it.Path, "/etc/modprobe.d/") {
+				changedModprobe = true
+			}
 		}
 	}
 
-	// Post-steps
+	// Post-steps: dconf
 	if !dry && dconfTouched {
-		// Ensure GNOME reads the system db ("local") and recompile the DB.
 		if err := ensureDconfProfile(); err != nil {
 			r.log.Warn("dconf", "ensure profile failed", "err", err.Error())
 		}
-		// compile first for clearer errors
+		// compile local.d for clearer errors first
 		if out, err := exec.CommandContext(ctx, "/usr/bin/dconf", "compile", "/tmp/local.dconf", "/etc/dconf/db/local.d").CombinedOutput(); err != nil {
 			r.log.Warn("dconf", "compile failed", "err", err.Error(), "out", strings.TrimSpace(string(out)))
 		}
-		// then update the full system dbs
 		if err := runDconfUpdate(ctx, r); err != nil {
 			r.log.Warn("dconf", "update failed", "err", err.Error())
 		} else {
 			r.log.Info("dconf", "updated system database")
 		}
 	}
+
+	// Post-steps: initramfs
 	if !dry && initramfsTouched {
 		_ = exec.CommandContext(ctx, "update-initramfs", "-u").Run()
 	}
+
+	// Post-steps: instant modprobe (only if a modprobe file changed)
+	if !dry && changedModprobe && len(runtimeModprobe) > 0 {
+		uniq := unique(runtimeModprobe)
+		if err := runInstantModprobe(ctx, r, uniq); err != nil {
+			r.log.Warn("modprobe", "instant apply had errors", "err", err.Error())
+		} else {
+			r.log.Info("modprobe", "instant apply attempted", "modules", strings.Join(uniq, ","))
+		}
+	}
+
 	if !dry {
 		r.saveManaged(desiredManaged)
 	}
@@ -355,7 +356,6 @@ type applyItem struct {
 }
 
 func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
-	// Strict allow-list of writable paths
 	okPath := strings.HasPrefix(it.Path, "/etc/polkit-1/rules.d/60-lgpo-") ||
 		strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/60-lgpo-") ||
 		strings.HasPrefix(it.Path, "/etc/dconf/db/local.d/locks/60-lgpo-") ||
@@ -364,19 +364,16 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 		return false, fmt.Errorf("path not allowed: %s", it.Path)
 	}
 
-	// Drift check
 	if b, err := os.ReadFile(it.Path); err == nil {
 		if string(b) == string(it.Data) {
 			return false, nil
 		}
 	}
 
-	// Dry-run
 	if dry {
 		return true, nil
 	}
 
-	// Atomic write
 	if err := os.MkdirAll(filepath.Dir(it.Path), 0o755); err != nil {
 		return false, err
 	}
@@ -395,8 +392,8 @@ func (r *Runner) applyAtomic(it applyItem, dry bool) (bool, error) {
 	return true, nil
 }
 
-// ensureDconfProfile guarantees that the system dconf database ("local")
-// is included in the user profile so system defaults/locks take effect.
+// ---------- dconf helpers ----------
+
 func ensureDconfProfile() error {
 	const path = "/etc/dconf/profile/user"
 	if _, err := os.Stat(path); err == nil {
@@ -413,28 +410,21 @@ func ensureDconfProfile() error {
 	return os.Rename(tmp, path)
 }
 
-// runDconfUpdate finds and runs `dconf update`, logging any failure.
-// It tolerates a minimal service PATH and falls back to /usr/bin/dconf if needed.
 func runDconfUpdate(ctx context.Context, r *Runner) error {
 	bin, err := exec.LookPath("dconf")
 	if err != nil {
-		// try common absolute path as a fallback
 		if _, st := os.Stat("/usr/bin/dconf"); st == nil {
 			bin = "/usr/bin/dconf"
 		} else {
 			return fmt.Errorf("dconf not found in PATH: %v", err)
 		}
 	}
-
 	cmd := exec.CommandContext(ctx, bin, "update")
-
-	// Ensure we have a sane PATH when running under a minimal service environment.
 	if os.Getenv("PATH") == "" {
 		cmd.Env = append(os.Environ(), "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	} else {
 		cmd.Env = os.Environ()
 	}
-
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v (output: %s)", err, strings.TrimSpace(string(out)))
@@ -445,8 +435,59 @@ func runDconfUpdate(ctx context.Context, r *Runner) error {
 	return nil
 }
 
-// loadTags reads *.tag files and returns key->value.
-// It ignores blank lines and lines starting with '#', and takes the first value line.
+// ---------- modprobe instant apply ----------
+
+func unique(in []string) []string {
+	m := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := m[s]; ok {
+			continue
+		}
+		m[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func runInstantModprobe(ctx context.Context, r *Runner, modules []string) error {
+	var firstErr error
+	for _, m := range modules {
+		if !moduleLoaded(m) {
+			continue
+		}
+		// absolute path; systemd sandboxes may have a minimal PATH
+		path := "/sbin/modprobe"
+		if _, err := os.Stat(path); err != nil {
+			path = "/usr/sbin/modprobe"
+		}
+		cmd := exec.CommandContext(ctx, path, "-r", m)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			r.log.Warn("modprobe", "remove failed", "module", m, "err", err.Error(), "out", strings.TrimSpace(string(out)))
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		r.log.Info("modprobe", "removed", "module", m)
+	}
+	return firstErr
+}
+
+func moduleLoaded(name string) bool {
+	b, err := os.ReadFile("/proc/modules")
+	if err != nil {
+		return false
+	}
+	s := string(b)
+	needle := name + " "
+	alt := strings.ReplaceAll(name, "_", "-") + " "
+	return strings.Contains(s, needle) || strings.Contains(s, alt)
+}
+
+// ---------- tags reader ----------
+
 func loadTags(dir string) map[string]string {
 	m := map[string]string{}
 	ents, err := os.ReadDir(dir)
@@ -472,7 +513,7 @@ func loadTags(dir string) map[string]string {
 				continue
 			}
 			val = line
-			break // first non-comment line wins
+			break
 		}
 		k := strings.TrimSuffix(name, ".tag")
 		m[k] = val
